@@ -3,6 +3,7 @@
 A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/tortoise-wow) private server (based on MaNGOS Zero) using containerized services for MariaDB, `realmd`, and `mangosd`.
 
 > **Credit:** All server source code belongs to the [Tortoise WoW project](https://github.com/Penqle/tortoise-wow). This repository only provides the Docker deployment configuration.
+> **Compiled Executables** The two bundled executables (realmd/mangosd) are compiled on Ubuntu 25.10, minor changes are needed to fix Warden module and fit to a newer C++ compiler. The modified source code is here  [Tortoise WoW Dev](https://gitlab.thesageharbor.com/lurundao/tortoise-wow-dev).
 
 ---
 
@@ -19,7 +20,7 @@ A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/to
 ## Prerequisites
 
 - Docker & Docker Compose installed on the host
-- Server-side data files extracted from the WoW 1.12 client
+- Server-side data files extracted from the 1.17.2 client
 - An exported game database dump (see below)
 
 > **About the binaries:** This project ships `realmd` and `mangosd` compiled natively on Linux for best performance. This is a **native Linux approach** — not Wine. The binaries run directly on the host kernel via Docker, giving you full performance without any Windows compatibility layer.
@@ -199,9 +200,36 @@ data/patches/
 # Database dumps
 mariadb/init/*.sql.gz
 
-# Compiled binaries
-realmd/realmd
-mangosd/mangosd
+# Compiled binaries (release configuration)
+realmd/realmd (SHA256: c54b48bab3c570eeb987d82f4f1c67b104014999fd445712c83a35c3300fba1a)
+mangosd/mangosd (SHA256: 1ed7ee199f6e1cdf7c0c6b2ba16d8fe07fe731cf650d303febdf7da2a7dd3591)
+
+# Dependencies
+ldd mangosd
+        linux-vdso.so.1 (0x0000761ac0e04000)
+        libACE-8.0.2.so => /lib/x86_64-linux-gnu/libACE-8.0.2.so (0x0000761abfa6b000)
+        libmariadb.so.3 => /lib/x86_64-linux-gnu/libmariadb.so.3 (0x0000761ac0d9c000)
+        libssl.so.3 => /lib/x86_64-linux-gnu/libssl.so.3 (0x0000761abf95f000)
+        libcrypto.so.3 => /lib/x86_64-linux-gnu/libcrypto.so.3 (0x0000761abf200000)
+        libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x0000761ac0d7e000)
+        libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x0000761abee00000)
+        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x0000761abf868000)
+        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x0000761ac0d4f000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000761abea00000)
+        libzstd.so.1 => /lib/x86_64-linux-gnu/libzstd.so.1 (0x0000761abf10f000)
+
+ldd realmd
+        linux-vdso.so.1 (0x000079cedb25a000)
+        libACE-8.0.2.so => /lib/x86_64-linux-gnu/libACE-8.0.2.so (0x000079cedb025000)
+        libmariadb.so.3 => /lib/x86_64-linux-gnu/libmariadb.so.3 (0x000079cedafc9000)
+        libcrypto.so.3 => /lib/x86_64-linux-gnu/libcrypto.so.3 (0x000079ceda800000)
+        libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x000079ceda400000)
+        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x000079cedaf9c000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x000079ceda000000)
+        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x000079cedaea3000)
+        libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x000079cedae85000)
+        libssl.so.3 => /lib/x86_64-linux-gnu/libssl.so.3 (0x000079ceda6f4000)
+        libzstd.so.1 => /lib/x86_64-linux-gnu/libzstd.so.1 (0x000079ceda30f000)
 ```
 
 ---
