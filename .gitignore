@@ -1,0 +1,8 @@
+# Game database dumps are large — distribute separately
+mariadb/init/*.sql.gz
+data/mysql/
+data/maps/
+data/vmaps/
+data/mmaps/
+data/dbc/
+data/patches/

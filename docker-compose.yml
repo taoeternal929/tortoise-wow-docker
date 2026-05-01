@@ -1,0 +1,64 @@
+services:
+
+  mariadb:
+    image: mariadb:11
+    container_name: wow-mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: yourRootPassword
+      MYSQL_USER: mangos
+      MYSQL_PASSWORD: mangos
+      # Databases are typically created by the DB import scripts,
+      # so we don't set MYSQL_DATABASE here
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./mariadb/init:/docker-entrypoint-initdb.d:ro   # Grant permission
+    networks:
+      - wow-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  realmd:
+    build:
+      context: ./realmd
+    container_name: wow-realmd
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    volumes:
+      - ./realmd/realmd.conf:/opt/realmd/realmd.conf:ro
+      - ./data/patches:/opt/realmd/patches:ro
+    ports:
+      - "3724:3724"
+    networks:
+      - wow-net
+
+  mangosd:
+    build:
+      context: ./mangosd
+    container_name: wow-mangosd
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    volumes:
+      - ./mangosd/mangosd.conf:/opt/mangosd/mangosd.conf:ro
+      - ./data/dbc:/opt/mangosd/dbc:ro
+      - ./data/maps:/opt/mangosd/maps:ro
+      - ./data/vmaps:/opt/mangosd/vmaps:ro
+      - ./data/mmaps:/opt/mangosd/mmaps:ro
+    ports:
+      - "8085:8085"
+    networks:
+      - wow-net
+    stdin_open: true   # keeps the mangosd console interactive
+    tty: true
+
+networks:
+  wow-net:
+    driver: bridge
