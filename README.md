@@ -74,7 +74,7 @@ Place any client patch files into `data/patches/`. These are mounted into the `r
 
 ### 3. Database Dump
 
-You need a full export of a working Tortoise WoW database. This can be generated from an existing database insance using the following command:
+You need a full export of a working Tortoise WoW database. This can be generated from an existing database instance using the following command:
 
 ```bash
 mysqldump \
