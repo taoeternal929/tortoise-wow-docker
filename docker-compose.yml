@@ -52,6 +52,7 @@ services:
       - ./data/maps:/opt/mangosd/maps:ro
       - ./data/vmaps:/opt/mangosd/vmaps:ro
       - ./data/mmaps:/opt/mangosd/mmaps:ro
+      - ./data/database_updates:/opt/mangosd/database_updates:ro
     ports:
       - "8085:8085"
     networks:

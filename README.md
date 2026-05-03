@@ -51,6 +51,7 @@ wow-server/
     ├── maps/
     ├── vmaps/
     ├── mmaps/
+    ├── database_updates/       # server automatically picks up the updates here
     └── patches/                # client patches loaded by realmd on auth
 ```
 
