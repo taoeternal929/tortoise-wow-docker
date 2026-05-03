@@ -3,6 +3,7 @@
 A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/tortoise-wow) private server (based on MaNGOS Zero) using containerized services for MariaDB, `realmd`, and `mangosd`.
 
 > **Credit:** All server source code belongs to the [Tortoise WoW project](https://github.com/Penqle/tortoise-wow). This repository only provides the Docker deployment configuration.
+
 > **Compiled Executables** The two bundled executables (realmd/mangosd) are compiled on Ubuntu 25.10, minor changes are needed to fix Warden module and fit to a newer C++ compiler. The modified source code is here  [Tortoise WoW Dev](https://gitlab.thesageharbor.com/lurundao/tortoise-wow-dev).
 
 ---
@@ -181,30 +182,17 @@ cp ~/mangos_dump_DATE.sql.gz ./mariadb/init/02-mangos.sql.gz
 # 4. Bring services back up — init scripts run automatically on empty data dir
 docker compose up -d
 ```
+---
+## Compiled binaries (release configuration)
+**realmd/reammd** 
+SHA256: 29af00243fbb6b41f9cd6ccd62ea42a1c753992fb434aa5a2fee63a347b7a209 
+**mangosd/mangosd** 
+SHA256: 34665a89aa54beed7b6f579bbfc09ac76e66099dd2de514dc22c07969ae7293e
 
 ---
 
-## `.gitignore` Recommendations
-
-The following should not be committed to version control due to size or sensitivity:
-
-```gitignore
-# Large game data files
-data/mysql/
-data/maps/
-data/vmaps/
-data/mmaps/
-data/dbc/
-data/patches/
-
-# Database dumps
-mariadb/init/*.sql.gz
-
-# Compiled binaries (release configuration)
-realmd/realmd (SHA256: c54b48bab3c570eeb987d82f4f1c67b104014999fd445712c83a35c3300fba1a)
-mangosd/mangosd (SHA256: 1ed7ee199f6e1cdf7c0c6b2ba16d8fe07fe731cf650d303febdf7da2a7dd3591)
-
-# Dependencies
+## Dependencies
+```
 ldd mangosd
         linux-vdso.so.1 (0x0000761ac0e04000)
         libACE-8.0.2.so => /lib/x86_64-linux-gnu/libACE-8.0.2.so (0x0000761abfa6b000)
@@ -230,6 +218,24 @@ ldd realmd
         libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x000079cedae85000)
         libssl.so.3 => /lib/x86_64-linux-gnu/libssl.so.3 (0x000079ceda6f4000)
         libzstd.so.1 => /lib/x86_64-linux-gnu/libzstd.so.1 (0x000079ceda30f000)
+```
+---
+## `.gitignore` Recommendations
+
+The following should not be committed to version control due to size or sensitivity:
+
+```gitignore
+# Large game data files
+data/mysql/
+data/maps/
+data/vmaps/
+data/mmaps/
+data/dbc/
+data/patches/
+
+# Database dumps
+mariadb/init/*.sql.gz
+
 ```
 
 ---
