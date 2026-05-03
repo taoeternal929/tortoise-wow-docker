@@ -184,9 +184,9 @@ docker compose up -d
 ```
 ---
 ## Compiled binaries (release configuration)
-**realmd/reammd** 
+**realmd** 
 SHA256: 29af00243fbb6b41f9cd6ccd62ea42a1c753992fb434aa5a2fee63a347b7a209 
-**mangosd/mangosd** 
+**mangosd** 
 SHA256: 34665a89aa54beed7b6f579bbfc09ac76e66099dd2de514dc22c07969ae7293e
 
 ---
