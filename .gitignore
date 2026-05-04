@@ -1,8 +1,14 @@
 # Game database dumps are large — distribute separately
-mariadb/init/*.sql.gz
+# mariadb/init/*.sql.gz - now full base database comes with this repo
 data/mysql/
 data/maps/
 data/vmaps/
 data/mmaps/
 data/dbc/
 data/patches/
+# Ignore log files but keep folder structure
+logs/**/*.log
+logs/**/*.log*
+# Keep the placeholder files
+!logs/**/.gitkeep
+

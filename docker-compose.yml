@@ -1,18 +1,24 @@
 services:
 
   mariadb:
-    image: mariadb:11
-    container_name: wow-mariadb
+    build:
+      context: ./mariadb
+    container_name: mariadb
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: yourRootPassword
-      MYSQL_USER: mangos
-      MYSQL_PASSWORD: mangos
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      HOST_IP: ${HOST_IP} 
       # Databases are typically created by the DB import scripts,
       # so we don't set MYSQL_DATABASE here
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./mariadb/init:/docker-entrypoint-initdb.d:ro   # Grant permission
+      - ./mariadb/conf/my.cnf:/etc/mysql/conf.d/logging.cnf:ro
+      - ./logs/mariadb:/var/log/mysql
+    # ports:  # Database debug purpose
+    #  - "3307:3306"
     networks:
       - wow-net
     healthcheck:
@@ -33,6 +39,7 @@ services:
     volumes:
       - ./realmd/realmd.conf:/opt/realmd/realmd.conf:ro
       - ./data/patches:/opt/realmd/patches:ro
+      - ./logs/realmd:/opt/realmd/logs
     ports:
       - "3724:3724"
     networks:
@@ -53,6 +60,7 @@ services:
       - ./data/vmaps:/opt/mangosd/vmaps:ro
       - ./data/mmaps:/opt/mangosd/mmaps:ro
       - ./data/database_updates:/opt/mangosd/database_updates:ro
+      - ./logs/mangosd:/opt/mangosd/logs
     ports:
       - "8085:8085"
     networks:

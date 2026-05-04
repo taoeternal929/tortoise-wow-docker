@@ -33,6 +33,7 @@ A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/to
 ```
 wow-server/
 ├── docker-compose.yml
+├── .env                        # your host IP and DB credentials go here
 ├── realmd/
 │   ├── Dockerfile
 │   ├── realmd                  # compiled binary
@@ -42,19 +43,27 @@ wow-server/
 │   ├── mangosd                 # compiled binary
 │   └── mangosd.conf
 ├── mariadb/
+│   ├── Dockerfile
+│   ├── docker-entrypoint-wrap.sh
+│   ├── conf/
+│   │   └── my.cnf              # MariaDB logging configuration
 │   └── init/
-│       ├── 01-grants.sql       # user permission grants
-│       └── 02-mangos.sql.gz    # your exported database dump
+│       ├── 01-grants.sql                                                # user permission grants
+│       ├── 02-mangos_create_database_base_create_realmlist.sql.gz       # base database dump including create_database.sql, base/*.sql, realmlist.
+│       └── 03-realmlist.sh 
+├── logs/
+│   ├── mariadb/                # MariaDB log output
+│   ├── realmd/                 # realmd log output
+│   └── mangosd/                # mangosd log output
 └── data/
     ├── mysql/                  # mariadb data dir (auto-populated, do not touch)
     ├── dbc/
     ├── maps/
     ├── vmaps/
     ├── mmaps/
-    ├── database_updates/       # server automatically picks up the updates here
+    ├── database_updates/       # server automatically picks up updates here
     └── patches/                # client patches loaded by realmd on auth
 ```
-
 ---
 
 ## Preparing Server Data
@@ -74,43 +83,50 @@ Place them under `data/` as shown in the directory structure above.
 
 Place any client patch files into `data/patches/`. These are mounted into the `realmd` container and loaded during client authentication.
 
-### 3. Database Dump
+### 3. Database
 
-You need a full export of a working Tortoise WoW database. This can be generated from an existing database instance using the following command:
+This project ships with a **base database dump** (`mariadb/init/02-mangos_create_database_base_create_realmlist.sql.gz`) that includes:
 
-```bash
-mysqldump \
-  -h DB_IP_ADDRESS \
-  -P DB_PORT \
-  -u USERNAME \
-  -pPASSWORD \
-  --skip-ssl \
-  --single-transaction \
-  --routines \
-  --triggers \
-  --databases tw_char tw_logon tw_logs tw_world \
-  | gzip > /tmp/mangos_dump_$(date +%F).sql.gz
-```
+- `create_database.sql` — creates all required databases and schemas
+- `base/*.sql` — core world, logon, and character data
+- Realmlist seed entry
 
-Rename or copy the resulting file to:
+This means **you do not need to port or export a database from an existing server** to get started. Simply follow the First-Time Setup steps below.
 
-```
-mariadb/init/02-mangos.sql.gz
-```
+For ongoing world data updates, place SQL patch files into `data/database_updates/`. The `mangosd` server picks these up automatically at startup, keeping your world data in sync with upstream [Tortoise WoW](https://github.com/Penqle/tortoise-wow) releases without requiring a full re-import.
 
-> The `mariadb/init/` directory is mounted as `docker-entrypoint-initdb.d`. MariaDB will automatically import all `.sql` and `.sql.gz` files in filename order on the **first startup** against an empty data directory.
+> **Migrating from an existing server?** You can still import your own dump by replacing `02-mangos_create_database_base_create_realmlist.sql.gz` with your own export. See [Migration](#migration--re-importing-the-database) below.
 
 ---
 
 ## Configuration
+
+### `.env` — Host IP Address
+
+Because `realmd` and `mangosd` run inside Docker's internal network (`wow-net`), WoW clients on your LAN need to know your **host machine's LAN IP** to connect. This IP is used to update the realmlist entry in the database at startup.
+
+Auto-detecting the LAN IP from inside the container would require exposing containers to the host network, which introduces unnecessary security risk. Instead, you provide it explicitly via a `.env` file — this keeps containers fully isolated within `wow-net`.
+
+`.env.example`:
+```ini
+# Your host machine's LAN IP (the IP other machines on your network use to reach this machine)
+# To find it on Linux, run: ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}'
+HOST_IP=192.168.1.x
+
+# MariaDB credentials
+MYSQL_ROOT_PASSWORD=yourRootPassword
+MYSQL_USER=mangos
+MYSQL_PASSWORD=mangos
+```
 
 ### `realmd.conf`
 
 Set the database connection to use the Docker service name `mariadb` as the host:
 
 ```ini
-LoginDatabaseInfo = "mariadb;3306;mangos;mangos;realmd"
+LoginDatabaseInfo = "mariadb;3306;mangos;mangos;tw_logon"
 PatchesDir        = "/opt/realmd/patches"
+LogsDir           = "/opt/realmd/logs"
 ```
 
 ### `mangosd.conf`
@@ -122,6 +138,13 @@ WorldDatabaseInfo     = "mariadb;3306;mangos;mangos;mangos"
 CharacterDatabaseInfo = "mariadb;3306;mangos;mangos;characters"
 LoginDatabaseInfo     = "mariadb;3306;mangos;mangos;realmd"
 DataDir               = "/opt/mangosd"
+
+# DB Auto-updater
+Database.AutoUpdate.Enabled = 1
+Database.AutoUpdate.Path = "/opt/mangosd/"
+Database.AutoUpdate.AuthUpdateName = "unused"
+Database.AutoUpdate.CharUpdateName = "unused"
+Database.AutoUpdate.WorldUpdateName = "database_updates"
 ```
 
 > **Important:** Never use `localhost`, `127.0.0.1`, or your host machine's LAN IP in config files. Docker resolves service names automatically within the internal network.
@@ -140,6 +163,14 @@ docker compose up --build -d
 docker compose logs -f mariadb
 docker compose logs -f realmd
 docker compose logs -f mangosd
+
+# 4. Attach to wow-mangosd to create your account
+docker attach wow-mangosd
+# To check you can press enter and ">mangosd" should show up
+# Ignore anything on going from the prompt and just type and enter
+account create NAME PASSWORD
+
+# 5. To detach, simply do CTRL+P followed by CTRL+Q
 ```
 
 The MariaDB init process may take a few minutes on first run depending on the size of the database dump.
@@ -174,11 +205,12 @@ To migrate to a new host or re-initialize the database with a fresh dump:
 # 1. Stop services
 docker compose down
 
-# 2. Wipe the MariaDB data directory
+# 2. Wipe the MariaDB data directory. Remember to back befor doing so!
 sudo rm -rf ./data/mysql/*
 
-# 3. Replace the dump file
-cp ~/mangos_dump_DATE.sql.gz ./mariadb/init/02-mangos.sql.gz
+# 3. Remove provided dump and replace it with your dump file
+rm ./mariadb/init/02-*.sql.gz
+cp ~/your_mangos_dump.sql.gz ./mariadb/init/02-mangos_dump.sql.gz
 
 # 4. Bring services back up — init scripts run automatically on empty data dir
 docker compose up -d
@@ -186,7 +218,7 @@ docker compose up -d
 ---
 ## Compiled binaries (release configuration)
 **realmd** 
-SHA256: 29af00243fbb6b41f9cd6ccd62ea42a1c753992fb434aa5a2fee63a347b7a209 
+SHA256: 29af00243fbb6b41f9cd6ccd62ea42a1c753992fb434aa5a2fee63a347b7a209\
 **mangosd** 
 SHA256: 34665a89aa54beed7b6f579bbfc09ac76e66099dd2de514dc22c07969ae7293e
 
@@ -233,10 +265,6 @@ data/vmaps/
 data/mmaps/
 data/dbc/
 data/patches/
-
-# Database dumps
-mariadb/init/*.sql.gz
-
 ```
 
 ---
@@ -254,7 +282,7 @@ Please follow these guidelines when contributing:
 
 ## License
 
-Copyright (c) 2025 Taoeternal
+Copyright (c) 2026 Taoeternal
 
 This license applies solely to original contributions and modifications not directly created by the original creators.
 
