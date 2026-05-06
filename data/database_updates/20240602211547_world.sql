@@ -1,1 +1,0 @@
-update creature_template set name = 'Lord Rygel', subname = 'Frog Noble' where entry = 62004;
