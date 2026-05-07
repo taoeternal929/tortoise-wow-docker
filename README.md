@@ -21,7 +21,7 @@ A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/to
 ## Prerequisites
 
 - Docker & Docker Compose installed on the host
-- Server-side data files extracted from the 1.17.2 client
+- Server-side data files extracted from the 1.18.1 client
 - An exported game database dump (see below)
 
 > **About the binaries:** This project ships `realmd` and `mangosd` compiled natively on Linux for best performance. This is a **native Linux approach** — not Wine. The binaries run directly on the host kernel via Docker, giving you full performance without any Windows compatibility layer.
@@ -217,10 +217,9 @@ docker compose up -d
 ```
 ---
 ## Compiled binaries (release configuration)
-**realmd** 
-SHA256: 29af00243fbb6b41f9cd6ccd62ea42a1c753992fb434aa5a2fee63a347b7a209\
-**mangosd** 
-SHA256: 34665a89aa54beed7b6f579bbfc09ac76e66099dd2de514dc22c07969ae7293e
+**sha256sum mangosd/mangosd realmd/realmd**
+7d607173c03eacfd22d664498274738df205f5b870de38cfa63b6969d02f0cb7  mangosd/mangosd\
+eea6f5dcfae3d5eb4efa17e3c96e9f8450e99d51494fd58f5f141bffc7ae4610  realmd/realmd
 
 ---
 
