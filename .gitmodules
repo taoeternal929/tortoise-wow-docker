@@ -1,0 +1,3 @@
+[submodule "wow-registration"]
+	path = wow-registration
+	url = https://github.com/masterking32/WoWSimpleRegistration

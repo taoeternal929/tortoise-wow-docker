@@ -2,7 +2,7 @@
 
 A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/tortoise-wow) private server (based on MaNGOS Zero) using containerized services for MariaDB, `realmd`, and `mangosd`.
 
-> **Credit:** All server source code belongs to the [Tortoise WoW project](https://github.com/Penqle/tortoise-wow). This repository only provides the Docker deployment configuration.
+> **Credit:** All server source code belongs to the [Tortoise WoW project](https://github.com/Penqle/tortoise-wow). This repository only provides the Docker deployment configuration. Regiseration php server code belongs to the [WoWSimpleRegistration] (https://github.com/masterking32/WoWSimpleRegistration)
 
 > **Compiled Executables** The two bundled executables (realmd/mangosd) are compiled on Ubuntu 25.10, minor changes are needed to fix Warden module and fit to a newer C++ compiler. The modified source code is here  [Tortoise WoW Dev](https://gitlab.thesageharbor.com/lurundao/tortoise-wow-dev).
 
@@ -51,6 +51,13 @@ wow-server/
 │       ├── 01-grants.sql                                                # user permission grants
 │       ├── 02-mangos_create_database_base_create_realmlist.sql.gz       # base database dump including create_database.sql, base/*.sql, realmlist.
 │       └── 03-realmlist.sh 
+├── wow-registration/           # WoW Simple Registration portal
+│   ├── Dockerfile
+│   ├── entrypoint.sh
+│   ├── application/
+│   │   └── config/
+│   │       └── config.php      # portal configuration (edit this, not the .sample)
+│   └── ... (rest of cloned WoWSimpleRegistration repo)
 ├── logs/
 │   ├── mariadb/                # MariaDB log output
 │   ├── realmd/                 # realmd log output
@@ -101,7 +108,7 @@ For ongoing world data updates, place SQL patch files into `data/database_update
 
 ## Configuration
 
-### `.env` — Host IP Address
+### `.env` Environmental Variables
 
 Because `realmd` and `mangosd` run inside Docker's internal network (`wow-net`), WoW clients on your LAN need to know your **host machine's LAN IP** to connect. This IP is used to update the realmlist entry in the database at startup.
 
@@ -117,8 +124,11 @@ HOST_IP=192.168.1.x
 MYSQL_ROOT_PASSWORD=yourRootPassword
 MYSQL_USER=mangos
 MYSQL_PASSWORD=mangos
-```
 
+# Registration portal — full URL (including port) that players will use to access it
+# Use your host machine's LAN IP or a domain name
+SITE_URL=http://192.168.1.x:8080
+```
 ### `realmd.conf`
 
 Set the database connection to use the Docker service name `mariadb` as the host:
@@ -146,6 +156,20 @@ Database.AutoUpdate.AuthUpdateName = "unused"
 Database.AutoUpdate.CharUpdateName = "unused"
 Database.AutoUpdate.WorldUpdateName = "database_updates"
 ```
+### `wow-registration/application/config/config.php`
+
+The registration portal connects to the same `mariadb` container as the game server. Key settings:
+
+```php
+$config['db_host'] = 'mariadb';    // Docker service name — never use 127.0.0.1 or localhost
+$config['db_name'] = 'tw_logon';
+$config['db_user'] = 'mangos';
+$config['db_pass'] = 'mangos';
+$config['db_port'] = '3308';
+$config['srp6_support'] = false;   // TurtleWoW/CMangos uses sha_pass_hash, not SRP6
+```
+
+> **`baseurl` is managed automatically** via the `SITE_URL` variable in `.env`. The entrypoint script injects it into `config.php` on every container start — you do not need to set it manually in `config.php`.
 
 > **Important:** Never use `localhost`, `127.0.0.1`, or your host machine's LAN IP in config files. Docker resolves service names automatically within the internal network.
 
