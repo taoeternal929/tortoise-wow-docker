@@ -74,15 +74,15 @@ services:
   # ─────────────────────────────────────────────
   wow-registration:
     build:
-      context: ./wow-registration   # sub-folder containing the cloned WoWSimpleRegistration repo + Dockerfile
-      dockerfile: Dockerfile
+      context: .                              # repo root — sees both folders
+      dockerfile: wow-registration-docker/Dockerfile
     container_name: wow-registration-1181dev
     restart: unless-stopped
     ports:
       - "8080:80"
     volumes:
       # Edit config.php on the host; no rebuild needed
-      - ./wow-registration/application/config/config.php:/var/www/html/application/config/config.php
+      - ./wow-registration-docker/config.php:/var/www/html/application/config/config.php
     environment:
       - SITE_URL=${SITE_URL:-http://localhost:8080}
     depends_on:

@@ -51,13 +51,11 @@ wow-server/
 │       ├── 01-grants.sql                                                # user permission grants
 │       ├── 02-mangos_create_database_base_create_realmlist.sql.gz       # base database dump including create_database.sql, base/*.sql, realmlist.
 │       └── 03-realmlist.sh 
-├── wow-registration/           # WoW Simple Registration portal
+├── wow-registration/          # submodule (upstream code, don't touch)
+├── wow-registration-docker/   # Registeration docker/config files live here
 │   ├── Dockerfile
 │   ├── entrypoint.sh
-│   ├── application/
-│   │   └── config/
-│   │       └── config.php      # portal configuration (edit this, not the .sample)
-│   └── ... (rest of cloned WoWSimpleRegistration repo)
+│   └── config.php
 ├── logs/
 │   ├── mariadb/                # MariaDB log output
 │   ├── realmd/                 # realmd log output
@@ -174,27 +172,89 @@ $config['srp6_support'] = false;   // TurtleWoW/CMangos uses sha_pass_hash, not 
 > **Important:** Never use `localhost`, `127.0.0.1`, or your host machine's LAN IP in config files. Docker resolves service names automatically within the internal network.
 
 ---
+## WoW Simple Registration Portal Setup
 
+The registration portal is based on [WoWSimpleRegistration](https://github.com/masterking32/WoWSimpleRegistration) by masterking32. It shares the existing `mariadb` database — no separate database container is needed.
+
+### 1. Clone WoWSimpleRegistration into the subfolder
+
+```bash
+git clone https://github.com/masterking32/WoWSimpleRegistration wow-registration
+```
+
+### 2. Add the Docker files
+
+Place the following files into the `wow-registration/` directory (they are provided in this repo):
+
+- `Dockerfile` — builds a PHP 8.2 + Apache image with all required extensions (GMP, GD, ZIP, SOAP, Mbstring, PDO, PDO-MySQL) and runs `composer install` automatically at build time
+- `entrypoint.sh` — copies `config.php.sample` on first run and injects `SITE_URL` at every startup
+
+### 3. Create config.php
+
+```bash
+cp wow-registration/application/config/config.php.sample \
+   wow-registration/application/config/config.php
+```
+
+Then edit `config.php` with the settings shown in the [Configuration](#wowregistrationapplicationconfigconfigphp) section above.
+
+### 4. Set SITE_URL in .env
+
+```
+SITE_URL=http://192.168.1.x:8080
+```
+
+This is the only setting that changes between deployments — all asset URLs and form actions are derived from it automatically.
+
+### Updating SITE_URL without rebuilding
+
+If you change `SITE_URL` in `.env`, just restart the container — no rebuild needed:
+
+```bash
+docker compose restart wow-registration
+```
+
+### Verifying the portal is working
+
+```bash
+# Confirm baseurl was injected correctly from SITE_URL
+docker exec -it wow-registration grep "baseurl" /var/www/html/application/config/config.php
+```
 ## First-Time Setup
 
 ```bash
-# 1. Clone this repo and place your binaries, configs, data, and dump as described above
+# 1. Clone this repo and switch to the 1181dev branch
+git clone -b 1181dev https://github.com/taoeternal929/tortoise-wow-docker
+cd tortoise-wow-docker
 
-# 2. Build images and start all services
+# 2. Clone WoWSimpleRegistration into the wow-registration subfolder
+git clone https://github.com/masterking32/WoWSimpleRegistration wow-registration
+
+# 3. Copy and configure config.php for the registration portal
+# Edit wow-registration-docker/config.php as described in Configuration above
+
+# 4. Edit .env. according fto your HOST_IP, credentials, and SITE_URL
+
+# 5. Place your game data (dbc, maps, vmaps, mmaps) under data/
+
+# 6. Build images and start all services
 docker compose up --build -d
 
-# 3. Follow logs to confirm successful database import and server startup
+# 7. Follow logs to confirm successful database import and server startup
 docker compose logs -f mariadb
 docker compose logs -f realmd
 docker compose logs -f mangosd
+docker compose logs -f wow-registration
 
-# 4. Attach to wow-mangosd to create your account
+# 8. Attach to wow-mangosd to create your first game account (Optional)
 docker attach wow-mangosd
-# To check you can press enter and ">mangosd" should show up
-# Ignore anything on going from the prompt and just type and enter
+# Press Enter — ">mangosd" prompt should appear
 account create NAME PASSWORD
 
-# 5. To detach, simply do CTRL+P followed by CTRL+Q
+# 9. To detach without stopping: Ctrl+P then Ctrl+Q
+
+# 10. Open the registration portal in your browser
+#     http://<your SITE_URL>  (e.g. http://192.168.1.x:8080)
 ```
 
 The MariaDB init process may take a few minutes on first run depending on the size of the database dump.
