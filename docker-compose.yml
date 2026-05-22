@@ -68,6 +68,29 @@ services:
     stdin_open: true   # keeps the mangosd console interactive
     tty: true
 
+  # ─────────────────────────────────────────────
+  # WoW Simple Registration portal (PHP 8 + Apache)
+  # Access at http://<your-host-ip>:8080
+  # ─────────────────────────────────────────────
+  wow-registration:
+    build:
+      context: .                              # repo root — sees both folders
+      dockerfile: wow-registration-docker/Dockerfile
+    container_name: wow-registration
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      # Edit config.php on the host; no rebuild needed
+      - ./wow-registration-docker/config.php:/var/www/html/application/config/config.php
+    environment:
+      - SITE_URL=${SITE_URL:-http://localhost:8080}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - wow-net
+
 networks:
   wow-net:
     driver: bridge

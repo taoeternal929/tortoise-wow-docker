@@ -2,7 +2,7 @@
 
 A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/tortoise-wow) private server (based on MaNGOS Zero) using containerized services for MariaDB, `realmd`, and `mangosd`.
 
-> **Credit:** All server source code belongs to the [Tortoise WoW project](https://github.com/Penqle/tortoise-wow). This repository only provides the Docker deployment configuration.
+> **Credit:** All server source code belongs to the [Tortoise WoW project](https://github.com/Penqle/tortoise-wow). This repository only provides the Docker deployment configuration. Regiseration php server code belongs to the [WoWSimpleRegistration] (https://github.com/masterking32/WoWSimpleRegistration)
 
 > **Compiled Executables** The two bundled executables (realmd/mangosd) are compiled on Ubuntu 25.10, minor changes are needed to fix Warden module and fit to a newer C++ compiler. The modified source code is here  [Tortoise WoW Dev](https://gitlab.thesageharbor.com/lurundao/tortoise-wow-dev).
 
@@ -21,7 +21,7 @@ A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/to
 ## Prerequisites
 
 - Docker & Docker Compose installed on the host
-- Server-side data files extracted from the 1.17.2 client
+- Server-side data files extracted from the 1.18.1 client
 - An exported game database dump (see below)
 
 > **About the binaries:** This project ships `realmd` and `mangosd` compiled natively on Linux for best performance. This is a **native Linux approach** — not Wine. The binaries run directly on the host kernel via Docker, giving you full performance without any Windows compatibility layer.
@@ -51,6 +51,11 @@ wow-server/
 │       ├── 01-grants.sql                                                # user permission grants
 │       ├── 02-mangos_create_database_base_create_realmlist.sql.gz       # base database dump including create_database.sql, base/*.sql, realmlist.
 │       └── 03-realmlist.sh 
+├── wow-registration/          # submodule (upstream code, don't touch)
+├── wow-registration-docker/   # Registeration docker/config files live here
+│   ├── Dockerfile
+│   ├── entrypoint.sh
+│   └── config.php
 ├── logs/
 │   ├── mariadb/                # MariaDB log output
 │   ├── realmd/                 # realmd log output
@@ -101,7 +106,7 @@ For ongoing world data updates, place SQL patch files into `data/database_update
 
 ## Configuration
 
-### `.env` — Host IP Address
+### `.env` Environmental Variables
 
 Because `realmd` and `mangosd` run inside Docker's internal network (`wow-net`), WoW clients on your LAN need to know your **host machine's LAN IP** to connect. This IP is used to update the realmlist entry in the database at startup.
 
@@ -117,8 +122,11 @@ HOST_IP=192.168.1.x
 MYSQL_ROOT_PASSWORD=yourRootPassword
 MYSQL_USER=mangos
 MYSQL_PASSWORD=mangos
-```
 
+# Registration portal — full URL (including port) that players will use to access it
+# Use your host machine's LAN IP or a domain name
+SITE_URL=http://192.168.1.x:8080
+```
 ### `realmd.conf`
 
 Set the database connection to use the Docker service name `mariadb` as the host:
@@ -146,31 +154,107 @@ Database.AutoUpdate.AuthUpdateName = "unused"
 Database.AutoUpdate.CharUpdateName = "unused"
 Database.AutoUpdate.WorldUpdateName = "database_updates"
 ```
+### `wow-registration/application/config/config.php`
+
+The registration portal connects to the same `mariadb` container as the game server. Key settings:
+
+```php
+$config['db_host'] = 'mariadb';    // Docker service name — never use 127.0.0.1 or localhost
+$config['db_name'] = 'tw_logon';
+$config['db_user'] = 'mangos';
+$config['db_pass'] = 'mangos';
+$config['db_port'] = '3308';
+$config['srp6_support'] = false;   // TurtleWoW/CMangos uses sha_pass_hash, not SRP6
+```
+
+> **`baseurl` is managed automatically** via the `SITE_URL` variable in `.env`. The entrypoint script injects it into `config.php` on every container start — you do not need to set it manually in `config.php`.
 
 > **Important:** Never use `localhost`, `127.0.0.1`, or your host machine's LAN IP in config files. Docker resolves service names automatically within the internal network.
 
 ---
+## WoW Simple Registration Portal Setup
 
+The registration portal is based on [WoWSimpleRegistration](https://github.com/masterking32/WoWSimpleRegistration) by masterking32. It shares the existing `mariadb` database — no separate database container is needed.
+
+### 1. Clone WoWSimpleRegistration into the subfolder
+
+```bash
+git clone https://github.com/masterking32/WoWSimpleRegistration wow-registration
+```
+
+### 2. Add the Docker files
+
+Place the following files into the `wow-registration/` directory (they are provided in this repo):
+
+- `Dockerfile` — builds a PHP 8.2 + Apache image with all required extensions (GMP, GD, ZIP, SOAP, Mbstring, PDO, PDO-MySQL) and runs `composer install` automatically at build time
+- `entrypoint.sh` — copies `config.php.sample` on first run and injects `SITE_URL` at every startup
+
+### 3. Create config.php
+
+```bash
+cp wow-registration/application/config/config.php.sample \
+   wow-registration/application/config/config.php
+```
+
+Then edit `config.php` with the settings shown in the [Configuration](#wowregistrationapplicationconfigconfigphp) section above.
+
+### 4. Set SITE_URL in .env
+
+```
+SITE_URL=http://192.168.1.x:8080
+```
+
+This is the only setting that changes between deployments — all asset URLs and form actions are derived from it automatically.
+
+### Updating SITE_URL without rebuilding
+
+If you change `SITE_URL` in `.env`, just restart the container — no rebuild needed:
+
+```bash
+docker compose restart wow-registration
+```
+
+### Verifying the portal is working
+
+```bash
+# Confirm baseurl was injected correctly from SITE_URL
+docker exec -it wow-registration grep "baseurl" /var/www/html/application/config/config.php
+```
 ## First-Time Setup
 
 ```bash
-# 1. Clone this repo and place your binaries, configs, data, and dump as described above
+# 1. Clone this repo
+git clone https://github.com/taoeternal929/tortoise-wow-docker
+cd tortoise-wow-docker
 
-# 2. Build images and start all services
+# 2. Clone WoWSimpleRegistration into the wow-registration subfolder
+git clone https://github.com/masterking32/WoWSimpleRegistration wow-registration
+
+# 3. Copy and configure config.php for the registration portal
+# Edit wow-registration-docker/config.php as described in Configuration above
+
+# 4. Edit .env. according fto your HOST_IP, credentials, and SITE_URL
+
+# 5. Place your game data (dbc, maps, vmaps, mmaps) under data/
+
+# 6. Build images and start all services
 docker compose up --build -d
 
-# 3. Follow logs to confirm successful database import and server startup
+# 7. Follow logs to confirm successful database import and server startup
 docker compose logs -f mariadb
 docker compose logs -f realmd
 docker compose logs -f mangosd
+docker compose logs -f wow-registration
 
-# 4. Attach to wow-mangosd to create your account
+# 8. Attach to wow-mangosd to create your first game account (Optional)
 docker attach wow-mangosd
-# To check you can press enter and ">mangosd" should show up
-# Ignore anything on going from the prompt and just type and enter
+# Press Enter — ">mangosd" prompt should appear
 account create NAME PASSWORD
 
-# 5. To detach, simply do CTRL+P followed by CTRL+Q
+# 9. To detach without stopping: Ctrl+P then Ctrl+Q
+
+# 10. Open the registration portal in your browser
+#     http://<your SITE_URL>  (e.g. http://192.168.1.x:8080)
 ```
 
 The MariaDB init process may take a few minutes on first run depending on the size of the database dump.
@@ -217,10 +301,9 @@ docker compose up -d
 ```
 ---
 ## Compiled binaries (release configuration)
-**realmd** 
-SHA256: 29af00243fbb6b41f9cd6ccd62ea42a1c753992fb434aa5a2fee63a347b7a209\
-**mangosd** 
-SHA256: 34665a89aa54beed7b6f579bbfc09ac76e66099dd2de514dc22c07969ae7293e
+**sha256sum mangosd/mangosd realmd/realmd**
+3d4f974ae8f0e36e42fb491d75883d77c56566ceec9c99e786ddece5733712bb  mangosd/mangosd\
+fd3a09a3a35a5e788c4fd22269566d86e027fed64ce9222daf803abfd1eb5f7f  realmd/realmd
 
 ---
 
