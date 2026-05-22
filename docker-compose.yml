@@ -89,7 +89,7 @@ services:
       mariadb:
         condition: service_healthy
     networks:
-      - wow-net-1181dev
+      - wow-net
 
 networks:
   wow-net:
