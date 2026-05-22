@@ -223,8 +223,8 @@ docker exec -it wow-registration grep "baseurl" /var/www/html/application/config
 ## First-Time Setup
 
 ```bash
-# 1. Clone this repo and switch to the 1181dev branch
-git clone -b 1181dev https://github.com/taoeternal929/tortoise-wow-docker
+# 1. Clone this repo
+git clone https://github.com/taoeternal929/tortoise-wow-docker
 cd tortoise-wow-docker
 
 # 2. Clone WoWSimpleRegistration into the wow-registration subfolder
