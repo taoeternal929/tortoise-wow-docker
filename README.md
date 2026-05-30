@@ -302,8 +302,8 @@ docker compose up -d
 ---
 ## Compiled binaries (release configuration)
 **sha256sum mangosd/mangosd realmd/realmd**
-3d4f974ae8f0e36e42fb491d75883d77c56566ceec9c99e786ddece5733712bb  mangosd/mangosd\
-fd3a09a3a35a5e788c4fd22269566d86e027fed64ce9222daf803abfd1eb5f7f  realmd/realmd
+6b96a30cc6f448fec15e013e57c1bcae04c35089ffed4958d7e4e5a23601daf0  mangosd/mangosd\
+cb27e20e65ab6e367010a893091d0d72db10627de94280326f09d8a82c11e169  realmd/realmd
 
 ---
 
