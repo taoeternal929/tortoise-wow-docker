@@ -163,14 +163,14 @@ jobs:
         if: env.PUBLISH == 'true'
         run: |
           for target in realmd mangosd tools; do docker push -q "$IMAGE_REPO/tortoise-wow-$target:$TAG"; done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ needs.plan.outputs.tag }}
           path: out/
           retention-days: 30
       - name: Upload build log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-log
           path: build.log
