@@ -29,8 +29,15 @@ services:
       start_period: 30s
 
   realmd:
+    # Prebuilt by .github/workflows/upstream-sync.yml. The tag is pinned here and
+    # moved forward by the workflow's pull requests; `docker compose pull` fetches
+    # it. If the image can't be pulled, Compose builds it from source instead.
+    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-realmd:${TW_IMAGE_TAG:-1181dev-6131a26-00efba26}
     build:
-      context: ./realmd
+      context: ./server
+      target: realmd
+      args:
+        UPSTREAM_COMMIT: 6131a26f91d60e64f6d58c7f0a9b6333f2d9f25a
     container_name: wow-realmd
     restart: unless-stopped
     depends_on:
@@ -46,8 +53,12 @@ services:
       - wow-net
 
   mangosd:
+    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-mangosd:${TW_IMAGE_TAG:-1181dev-6131a26-00efba26}
     build:
-      context: ./mangosd
+      context: ./server
+      target: mangosd
+      args:
+        UPSTREAM_COMMIT: 6131a26f91d60e64f6d58c7f0a9b6333f2d9f25a
     container_name: wow-mangosd
     restart: unless-stopped
     depends_on:

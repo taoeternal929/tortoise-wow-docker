@@ -1,0 +1,28 @@
+Build helper scripts from lurundao/tortoise-wow-dev, kept so the GitLab
+backup stays buildable by hand outside Docker. server/Dockerfile passes the
+same options itself and does not run these scripts.
+
+diff --git a/cmake_cmd b/cmake_cmd
+new file mode 100755
+index 0000000..b5571cb
+--- /dev/null
++++ b/cmake_cmd
+@@ -0,0 +1 @@
++cmake -B ./build  -DCMAKE_BUILD_TYPE=Debug   -DUSE_SCRIPTS=ON   -DUSE_EXTRACTORS=ON -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DUSE_ANTICHEAT=ON -DCMAKE_CXX_FLAGS="-gdwarf-4" -DALLOW_TURTLE_ADDONS=ON
+diff --git a/cmake_cmd_release b/cmake_cmd_release
+new file mode 100755
+index 0000000..861e004
+--- /dev/null
++++ b/cmake_cmd_release
+@@ -0,0 +1,11 @@
++cmake -B ./build \
++  -DCMAKE_BUILD_TYPE=Release \
++  -DUSE_SCRIPTS=ON \
++  -DUSE_EXTRACTORS=ON \
++  -DCMAKE_CXX_STANDARD=17 \
++  -DCMAKE_CXX_STANDARD_REQUIRED=ON \
++  -DUSE_ANTICHEAT=ON \
++  -DDEBUG_SYMBOLS=OFF \
++  -DCMAKE_EXE_LINKER_FLAGS="-Wl,--strip-all" \
++  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
++  -DALLOW_TURTLE_ADDONS=ON
