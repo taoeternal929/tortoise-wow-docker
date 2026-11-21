@@ -4,7 +4,7 @@ A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/to
 
 > **Credit:** All server source code belongs to the [Tortoise WoW project](https://github.com/Penqle/tortoise-wow). This repository only provides the Docker deployment configuration. Regiseration php server code belongs to the [WoWSimpleRegistration] (https://github.com/masterking32/WoWSimpleRegistration)
 
-> **Compiled Executables** The two bundled executables (realmd/mangosd) are compiled on Ubuntu 25.10, minor changes are needed to fix Warden module and fit to a newer C++ compiler. The modified source code is here  [Tortoise WoW Dev](https://gitlab.thesageharbor.com/lurundao/tortoise-wow-dev).
+> **Server images** `realmd` and `mangosd` are compiled from the upstream [tortoise-wow](https://github.com/tortoise-wow/tortoise-wow) source by GitHub Actions (see [Automated builds](#automated-builds)) and published to GHCR. The exact source of every build, upstream plus the patches in `server/patches/`, is backed up to [Tortoise WoW Dev](https://gitlab.thesageharbor.com/lurundao/tortoise-wow-dev) on GitLab.
 
 ---
 
@@ -24,7 +24,7 @@ A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/to
 - Server-side data files extracted from the 1.18.1 client
 - An exported game database dump (see below)
 
-> **About the binaries:** This project ships `realmd` and `mangosd` compiled natively on Linux for best performance. This is a **native Linux approach** — not Wine. The binaries run directly on the host kernel via Docker, giving you full performance without any Windows compatibility layer.
+> **About the binaries:** `realmd` and `mangosd` are native Linux builds (Ubuntu 26.04 base image), not Wine. They run directly on the host kernel via Docker, giving you full performance without any Windows compatibility layer.
 
 ---
 
@@ -34,13 +34,16 @@ A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/to
 wow-server/
 ├── docker-compose.yml
 ├── .env                        # your host IP and DB credentials go here
+├── server/
+│   ├── Dockerfile              # builds realmd/mangosd/tools images from upstream source
+│   ├── upstream.env            # pinned upstream commit (updated by the sync workflow)
+│   └── patches/                # our changes on top of upstream
+├── .github/
+│   ├── workflows/upstream-sync.yml
+│   └── scripts/                # sync + GitLab backup scripts used by the workflow
 ├── realmd/
-│   ├── Dockerfile
-│   ├── realmd                  # compiled binary
 │   └── realmd.conf
 ├── mangosd/
-│   ├── Dockerfile
-│   ├── mangosd                 # compiled binary
 │   └── mangosd.conf
 ├── mariadb/
 │   ├── Dockerfile
@@ -237,8 +240,10 @@ git clone https://github.com/masterking32/WoWSimpleRegistration wow-registration
 
 # 5. Place your game data (dbc, maps, vmaps, mmaps) under data/
 
-# 6. Build images and start all services
-docker compose up --build -d
+# 6. Pull the prebuilt server images, then start all services
+#    (mariadb and wow-registration are built locally on first start)
+docker compose pull realmd mangosd
+docker compose up -d
 
 # 7. Follow logs to confirm successful database import and server startup
 docker compose logs -f mariadb
@@ -300,41 +305,41 @@ cp ~/your_mangos_dump.sql.gz ./mariadb/init/02-mangos_dump.sql.gz
 docker compose up -d
 ```
 ---
-## Compiled binaries (release configuration)
-**sha256sum mangosd/mangosd realmd/realmd**
-f7633b2ca44a358c501f4852c0117b6cbcfe67b9f0f92134c00566e5a08df933  mangosd/mangosd\
-845da3c470d7e46b7dcf2b02141fd1b3d5bc1fc702eee3eece7150fc59b9a5a2  realmd/realmd
+## Automated builds
 
----
+`.github/workflows/upstream-sync.yml` replaces the manual merge → build → copy → commit loop.
 
-## Dependencies
+**What it does** (daily, or when run by hand from the Actions tab):
+
+1. Reads the tip of upstream `1181dev` (branch and repo are in `server/upstream.env`).
+2. Compiles `realmd`, `mangosd` and the extractors with `server/Dockerfile`: upstream source at that commit plus `server/patches/*.patch`, on Ubuntu 26.04.
+3. Publishes `ghcr.io/<owner>/tortoise-wow-{realmd,mangosd,tools}:<tag>`. The tag is `1181dev-<upstream commit>-<build id>`, where the build id is a hash of the Dockerfile and patches, so a tag always means the same source.
+4. Opens (or updates) one pull request, `bot/upstream-sync`, that copies upstream's new SQL migrations into `data/database_updates/` and moves the pinned tag in `docker-compose.yml`. The PR lists new migrations, **warns about migrations upstream edited after release** (existing servers re-run those), and lists config settings that differ from upstream's templates.
+5. Pushes the exact built source to GitLab `1181dev` as a fast-forward commit (parents: previous GitLab head + the upstream commit) and tags it `tw-<tag>`.
+
+Pushes to other branches only build, as a check; nothing is published.
+
+**Deploying an update:** merge the PR, then on the server:
+
+```bash
+git pull
+docker compose pull realmd mangosd
+docker compose up -d
 ```
-ldd mangosd
-        linux-vdso.so.1 (0x0000761ac0e04000)
-        libACE-8.0.2.so => /lib/x86_64-linux-gnu/libACE-8.0.2.so (0x0000761abfa6b000)
-        libmariadb.so.3 => /lib/x86_64-linux-gnu/libmariadb.so.3 (0x0000761ac0d9c000)
-        libssl.so.3 => /lib/x86_64-linux-gnu/libssl.so.3 (0x0000761abf95f000)
-        libcrypto.so.3 => /lib/x86_64-linux-gnu/libcrypto.so.3 (0x0000761abf200000)
-        libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x0000761ac0d7e000)
-        libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x0000761abee00000)
-        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x0000761abf868000)
-        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x0000761ac0d4f000)
-        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000761abea00000)
-        libzstd.so.1 => /lib/x86_64-linux-gnu/libzstd.so.1 (0x0000761abf10f000)
 
-ldd realmd
-        linux-vdso.so.1 (0x000079cedb25a000)
-        libACE-8.0.2.so => /lib/x86_64-linux-gnu/libACE-8.0.2.so (0x000079cedb025000)
-        libmariadb.so.3 => /lib/x86_64-linux-gnu/libmariadb.so.3 (0x000079cedafc9000)
-        libcrypto.so.3 => /lib/x86_64-linux-gnu/libcrypto.so.3 (0x000079ceda800000)
-        libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x000079ceda400000)
-        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x000079cedaf9c000)
-        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x000079ceda000000)
-        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x000079cedaea3000)
-        libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x000079cedae85000)
-        libssl.so.3 => /lib/x86_64-linux-gnu/libssl.so.3 (0x000079ceda6f4000)
-        libzstd.so.1 => /lib/x86_64-linux-gnu/libzstd.so.1 (0x000079ceda30f000)
+**One-time setup** (repository settings on GitHub):
+
+- *Settings → Actions → General → Workflow permissions*: tick **Allow GitHub Actions to create and approve pull requests**.
+- *Settings → Secrets and variables → Actions → New repository secret*: `GITLAB_TOKEN`, a GitLab project access token for `tortoise-wow-dev` with role **Developer** (Maintainer if `1181dev` is protected) and scope **write_repository**. Without it the GitLab step is skipped with a warning.
+- Optional repository variables `GITLAB_REPO_URL` / `GITLAB_BRANCH` override the backup target.
+- After the first publish, open each package under your GitHub profile → *Packages* and set its visibility to **Public** if it isn't already, so `docker compose pull` works without logging in.
+
+**Building locally instead** (about 10 minutes on 4 cores): `docker compose build realmd mangosd`. The extractors are in the `tools` image:
+
+```bash
+docker run --rm -it -v /path/to/wow-client:/client ghcr.io/<owner>/tortoise-wow-tools:<tag> mapextractor
 ```
+
 ---
 ## `.gitignore` Recommendations
 

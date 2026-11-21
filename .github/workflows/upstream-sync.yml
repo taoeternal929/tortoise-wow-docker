@@ -1,0 +1,236 @@
+# Builds realmd/mangosd from upstream Tortoise WoW, publishes the images to
+# GHCR, opens a pull request that moves this repo to the new version, and backs
+# the exact source up to GitLab.
+#
+# - schedule / manual run (on the default branch): follow the tip of
+#   UPSTREAM_BRANCH, or the commit given when run manually.
+# - push to the default branch: rebuild the pinned commit if the Dockerfile or
+#   patches changed (the image tag then changes, so a PR updates the pin).
+# - push to any other branch: build only, as a check. Nothing is published.
+#
+# One-time setup is described in README.md ("Automated builds").
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream_commit:
+        description: "Upstream commit to build (empty = tip of the branch in server/upstream.env)"
+        required: false
+        default: ""
+  push:
+    branches-ignore:
+      - "bot/**"
+    paths:
+      - "server/**"
+      - ".github/workflows/upstream-sync.yml"
+      - ".github/scripts/**"
+
+concurrency:
+  group: upstream-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GITLAB_REPO_URL: ${{ vars.GITLAB_REPO_URL || 'https://gitlab.thesageharbor.com/lurundao/tortoise-wow-dev.git' }}
+  GITLAB_BRANCH: ${{ vars.GITLAB_BRANCH || '1181dev' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      commit: ${{ steps.plan.outputs.commit }}
+      tag: ${{ steps.plan.outputs.tag }}
+      image_repo: ${{ steps.plan.outputs.image_repo }}
+      base: ${{ steps.plan.outputs.base }}
+      publish: ${{ steps.plan.outputs.publish }}
+      build: ${{ steps.plan.outputs.build }}
+      pr: ${{ steps.plan.outputs.pr }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: plan
+        env:
+          INPUT_COMMIT: ${{ github.event.inputs.upstream_commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . server/upstream.env
+          # Scheduled runs carry no repository details in their event, so ask the API.
+          base=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+          # Only the default branch publishes images, opens PRs and pushes to GitLab.
+          publish=false; [ "$GITHUB_REF_NAME" = "$base" ] && publish=true
+          case "$GITHUB_EVENT_NAME" in
+            push) commit=$UPSTREAM_COMMIT ;;
+            *)    if [ -n "$INPUT_COMMIT" ]; then
+                    commit=$(git ls-remote "$UPSTREAM_REPO" | awk -v c="$INPUT_COMMIT" 'index($1, c) == 1 { print $1; exit }')
+                    commit=${commit:-$INPUT_COMMIT}
+                  else
+                    commit=$(git ls-remote "$UPSTREAM_REPO" "refs/heads/$UPSTREAM_BRANCH" | cut -f1)
+                  fi ;;
+          esac
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::need a full 40-character upstream commit, got '$commit'"; exit 1; }
+
+          # The tag names both inputs of a build: the upstream commit and our
+          # Dockerfile + patches. Same inputs -> same tag; anything else -> new tag.
+          shopt -s nullglob
+          build_id=$(cat server/Dockerfile server/patches/*.patch | sha256sum | cut -c1-8)
+          tag="${UPSTREAM_BRANCH}-${commit:0:7}-${build_id}"
+          image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          pinned_tag=$(grep -oE 'TW_IMAGE_TAG:-[^}]+' docker-compose.yml | head -1 | cut -d- -f2-)
+
+          build=true
+          if [ "$publish" = true ]; then
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+            if docker manifest inspect "$image_repo/tortoise-wow-mangosd:$tag" >/dev/null 2>&1 \
+               && docker manifest inspect "$image_repo/tortoise-wow-realmd:$tag" >/dev/null 2>&1; then
+              build=false
+            fi
+          fi
+          pr=false
+          [ "$publish" = true ] && [ "$tag" != "$pinned_tag" ] && pr=true
+
+          {
+            echo "commit=$commit"; echo "tag=$tag"; echo "image_repo=$image_repo"; echo "base=$base"
+            echo "publish=$publish"; echo "build=$build"; echo "pr=$pr"
+          } | tee -a "$GITHUB_OUTPUT"
+          {
+            echo "### Plan"
+            echo "| | |"; echo "|---|---|"
+            echo "| upstream commit | \`$commit\` |"
+            echo "| image tag | \`$tag\` (repo pins \`$pinned_tag\`) |"
+            echo "| build | $build |"; echo "| publish images + GitLab backup | $publish |"; echo "| open/update PR | $pr |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      packages: write
+    env:
+      COMMIT: ${{ needs.plan.outputs.commit }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      IMAGE_REPO: ${{ needs.plan.outputs.image_repo }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Compile (builder stage)
+        run: |
+          set -o pipefail
+          # Full output goes to build.log (uploaded if this fails); the log here
+          # shows every 25th compile step, patch messages and errors.
+          docker build server --target builder --progress plain \
+            --build-arg UPSTREAM_COMMIT="$COMMIT" 2>&1 \
+            | tee build.log \
+            | { grep --line-buffered -E '\[[0-9]*(00|25|50|75)/[0-9]+\]|>>>|error:|ERROR' || true; }
+          df -h / | tail -1
+      - name: Build images
+        run: |
+          set -euo pipefail
+          for target in realmd mangosd tools; do
+            docker build server --target "$target" \
+              --build-arg UPSTREAM_COMMIT="$COMMIT" \
+              --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
+              --label org.opencontainers.image.revision="${GITHUB_SHA}" \
+              -t "$IMAGE_REPO/tortoise-wow-$target:$TAG"
+          done
+          docker build server --target binaries --build-arg UPSTREAM_COMMIT="$COMMIT" --output type=local,dest=out
+          ( cd out && sha256sum mangosd realmd > SHA256SUMS && cat SHA256SUMS )
+      - name: Smoke test
+        run: |
+          # The binaries must start far enough to read their config; without a
+          # config file they exit with an error message rather than crash.
+          for target in realmd mangosd; do
+            out=$(timeout 20 docker run --rm "$IMAGE_REPO/tortoise-wow-$target:$TAG" 2>&1 || true)
+            echo "--- $target"; echo "$out" | tail -5
+            if echo "$out" | grep -qiE 'error while loading shared libraries|segmentation fault|core dumped'; then exit 1; fi
+          done
+      - name: Push images
+        if: env.PUBLISH == 'true'
+        run: |
+          for target in realmd mangosd tools; do docker push -q "$IMAGE_REPO/tortoise-wow-$target:$TAG"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ needs.plan.outputs.tag }}
+          path: out/
+          retention-days: 30
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+
+  pull-request:
+    needs: [plan, build]
+    if: always() && needs.plan.outputs.pr == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      COMMIT: ${{ needs.plan.outputs.commit }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      BASE: ${{ needs.plan.outputs.base }}
+      BOT_BRANCH: bot/upstream-sync
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch upstream source
+        run: |
+          . server/upstream.env
+          git init -q upstream
+          git -C upstream fetch -q --depth 1 "$UPSTREAM_REPO" "$COMMIT"
+          git -C upstream checkout -q FETCH_HEAD
+      - name: Sync migrations and pins
+        run: .github/scripts/sync-upstream.sh upstream "$COMMIT" "$TAG" pr-body.md
+      - name: Open or update the pull request
+        run: |
+          set -euo pipefail
+          rm -rf upstream
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BOT_BRANCH"
+          git add -A data/database_updates server/upstream.env docker-compose.yml
+          git commit -q -m "Sync upstream 1181dev to ${COMMIT:0:7}" -m "Images: ${TAG}"
+          git push -f origin "$BOT_BRANCH"
+          title="Sync upstream to ${COMMIT:0:7} (${TAG})"
+          if gh pr view "$BOT_BRANCH" --json state -q .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$BOT_BRANCH" --title "$title" --body-file pr-body.md
+          else
+            gh pr create --base "$BASE" --head "$BOT_BRANCH" --title "$title" --body-file pr-body.md
+          fi
+          cat pr-body.md >> "$GITHUB_STEP_SUMMARY"
+
+  gitlab-backup:
+    needs: [plan, build]
+    if: always() && needs.plan.outputs.publish == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-24.04
+    env:
+      GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Push the built source to GitLab
+        if: env.GITLAB_TOKEN != ''
+        run: |
+          . server/upstream.env
+          UPSTREAM_REPO="$UPSTREAM_REPO" UPSTREAM_BRANCH="$UPSTREAM_BRANCH" \
+          UPSTREAM_COMMIT="${{ needs.plan.outputs.commit }}" BUILD_TAG="tw-${{ needs.plan.outputs.tag }}" \
+          PATCH_DIR=server/patches \
+          SOURCE_NOTE="Built by: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            .github/scripts/gitlab-backup.sh
+      - name: GitLab token not configured
+        if: env.GITLAB_TOKEN == ''
+        run: echo "::warning::GITLAB_TOKEN secret is not set, so the GitLab backup was skipped. See README.md (Automated builds)."
