@@ -150,12 +150,14 @@ jobs:
           ( cd out && sha256sum mangosd realmd > SHA256SUMS && cat SHA256SUMS )
       - name: Smoke test
         run: |
-          # The binaries must start far enough to read their config; without a
-          # config file they exit with an error message rather than crash.
+          # With no config file mounted, both servers should load their shared
+          # libraries, run, print this message and exit.
           for target in realmd mangosd; do
-            out=$(timeout 20 docker run --rm "$IMAGE_REPO/tortoise-wow-$target:$TAG" 2>&1 || true)
+            out=$(timeout 30 docker run --rm --name "smoke-$target" "$IMAGE_REPO/tortoise-wow-$target:$TAG" 2>&1 || true)
+            docker rm -f "smoke-$target" >/dev/null 2>&1 || true
             echo "--- $target"; echo "$out" | tail -5
-            if echo "$out" | grep -qiE 'error while loading shared libraries|segmentation fault|core dumped'; then exit 1; fi
+            echo "$out" | grep -q 'Could not find configuration file' \
+              || { echo "::error::$target did not start as expected"; exit 1; }
           done
       - name: Push images
         if: env.PUBLISH == 'true'
