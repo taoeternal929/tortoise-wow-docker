@@ -20,6 +20,7 @@ Checked against upstream `1181dev` `a4972d9` with unpatched builds on Ubuntu
 | Fix | Status upstream |
 |---|---|
 | `AccountMgr.h`, `AllocatorWithCategory.h`: missing `#include <optional>` | Upstream now includes `<optional>` in both. |
+| `DatabaseLogger.hpp`: missing `#include <optional>` | Still missing upstream, but all 9 files that include it compile with `USE_PCH=OFF`, because `<optional>` arrives through other headers first. Not needed; worth reporting upstream so the header is self-contained. |
 | `dep/include/rapidjson/document.h`: `GenericStringRef::operator=` | Upstream carries the same `= delete` change. |
 | `Util.h`: `fmt::underlying` replaced by a cast | Compiles with gcc 13 and gcc 15 against the bundled fmt 10.1. |
 | `tools/mmap`, `tools/vmap_assembler` CMake include paths | Extractors build without them on gcc 13 and gcc 15. |
