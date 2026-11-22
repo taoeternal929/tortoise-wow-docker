@@ -159,6 +159,10 @@ jobs:
             echo "$out" | grep -q 'Could not find configuration file' \
               || { echo "::error::$target did not start as expected"; exit 1; }
           done
+      - name: Stack test (MariaDB from the dump + realmd + mangosd)
+        # realmd must serve logins; mangosd must connect to all four databases.
+        # mangosd then stops at the map check, since CI has no client data.
+        run: python3 .github/scripts/dbtest.py stack --image-repo "$IMAGE_REPO" --tag "$TAG"
       - name: Push images
         if: env.PUBLISH == 'true'
         run: |
@@ -197,7 +201,16 @@ jobs:
           git -C upstream fetch -q --depth 1 "$UPSTREAM_REPO" "$COMMIT"
           git -C upstream checkout -q FETCH_HEAD
       - name: Sync migrations and pins
-        run: .github/scripts/sync-upstream.sh upstream "$COMMIT" "$TAG" pr-body.md
+        run: |
+          cp -a data/database_updates "$RUNNER_TEMP/previous-updates"
+          .github/scripts/sync-upstream.sh upstream "$COMMIT" "$TAG" pr-body.md
+      - name: Database upgrade check
+        # Applies this PR's migrations on top of the previous version, exactly as
+        # mangosd's auto-updater would, and adds the results to the PR body.
+        run: |
+          if ! python3 .github/scripts/dbtest.py migrations --previous "$RUNNER_TEMP/previous-updates" --report pr-body.md; then
+            printf '\n### Database check\n\n⚠️ The check could not run; see the workflow log.\n' >> pr-body.md
+          fi
       - name: Open or update the pull request
         run: |
           set -euo pipefail
@@ -209,6 +222,7 @@ jobs:
           git commit -q -m "Sync upstream 1181dev to ${COMMIT:0:7}" -m "Images: ${TAG}"
           git push -f origin "$BOT_BRANCH"
           title="Sync upstream to ${COMMIT:0:7} (${TAG})"
+          if grep -q '^❌ \*\*' pr-body.md; then title="❌ migrations fail: $title"; fi
           if gh pr view "$BOT_BRANCH" --json state -q .state 2>/dev/null | grep -q OPEN; then
             gh pr edit "$BOT_BRANCH" --title "$title" --body-file pr-body.md
           else

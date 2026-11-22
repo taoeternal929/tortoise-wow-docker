@@ -32,7 +32,7 @@ services:
     # Prebuilt by .github/workflows/upstream-sync.yml. The tag is pinned here and
     # moved forward by the workflow's pull requests; `docker compose pull` fetches
     # it. If the image can't be pulled, Compose builds it from source instead.
-    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-realmd:${TW_IMAGE_TAG:-1181dev-6131a26-00efba26}
+    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-realmd:${TW_IMAGE_TAG:-1181dev-6131a26-5eece623}
     build:
       context: ./server
       target: realmd
@@ -53,7 +53,7 @@ services:
       - wow-net
 
   mangosd:
-    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-mangosd:${TW_IMAGE_TAG:-1181dev-6131a26-00efba26}
+    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-mangosd:${TW_IMAGE_TAG:-1181dev-6131a26-5eece623}
     build:
       context: ./server
       target: mangosd

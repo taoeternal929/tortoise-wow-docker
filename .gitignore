@@ -12,3 +12,5 @@ logs/**/*.log*
 # Keep the placeholder files
 !logs/**/.gitkeep
 
+# Python bytecode from the CI helper scripts
+__pycache__/
