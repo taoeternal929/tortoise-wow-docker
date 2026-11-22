@@ -1,0 +1,34 @@
+Make upstream's documented -DPREFIX=... work with CMake 4.x.
+
+CMake 4 clears an internal PREFIX variable during compiler detection in
+project(), which exposes the user's -DPREFIX cache entry and makes compiler
+detection fail. Not needed by server/Dockerfile (it uses CMAKE_INSTALL_PREFIX);
+kept so the GitLab backup builds with the commands in upstream's docs.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 671e711..a2b2c60 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -19,7 +19,22 @@
+ # CMake policies
+ cmake_minimum_required(VERSION 3.1...3.29)
+ 
++# CMake 4.x clears an internal variable named PREFIX while detecting the
++# compiler in project(), which exposes a user's -DPREFIX=... cache entry and
++# breaks detection ("macro names must be identifiers"). Keep the user's value
++# aside until project() has finished.
++if(DEFINED PREFIX)
++  set(TW_USER_PREFIX "${PREFIX}")
++  unset(PREFIX CACHE)
++  unset(PREFIX)
++endif()
++
+ project(TurtleWoW)
++
++if(DEFINED TW_USER_PREFIX)
++  set(PREFIX "${TW_USER_PREFIX}" CACHE PATH "Install path prefix." FORCE)
++  unset(TW_USER_PREFIX)
++endif()
+ include(FetchContent)
+ 
+ # Allow -DACE_ROOT, -DTBB_ROOT, etc.

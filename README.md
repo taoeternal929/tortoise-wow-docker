@@ -314,8 +314,9 @@ docker compose up -d
 1. Reads the tip of upstream `1181dev` (branch and repo are in `server/upstream.env`).
 2. Compiles `realmd`, `mangosd` and the extractors with `server/Dockerfile`: upstream source at that commit plus `server/patches/*.patch`, on Ubuntu 26.04.
 3. Publishes `ghcr.io/<owner>/tortoise-wow-{realmd,mangosd,tools}:<tag>`. The tag is `1181dev-<upstream commit>-<build id>`, where the build id is a hash of the Dockerfile and patches, so a tag always means the same source.
-4. Opens (or updates) one pull request, `bot/upstream-sync`, that copies upstream's new SQL migrations into `data/database_updates/` and moves the pinned tag in `docker-compose.yml`. The PR lists new migrations, **warns about migrations upstream edited after release** (existing servers re-run those), and lists config settings that differ from upstream's templates.
-5. Pushes the exact built source to GitLab `1181dev` as a fast-forward commit (parents: previous GitLab head + the upstream commit) and tags it `tw-<tag>`.
+4. Tests the images: both servers must start (smoke test), then a stack test starts MariaDB from this repo's dump with the new images; realmd must serve logins and mangosd must connect to all four databases. (mangosd then stops at its map check, since CI has no client data.)
+5. Opens (or updates) one pull request, `bot/upstream-sync`, that copies upstream's new SQL migrations into `data/database_updates/` and moves the pinned tag in `docker-compose.yml`. The PR lists new migrations, **warns about migrations upstream edited after release** (existing servers re-run those), lists config settings that differ from upstream's templates, and includes a **database check**: the new migrations are applied on top of the previous version exactly the way mangosd's auto-updater would, and any failure is shown (and put in the PR title) before you deploy.
+6. Pushes the exact built source to GitLab `1181dev` as a fast-forward commit (parents: previous GitLab head + the upstream commit) and tags it `tw-<tag>`.
 
 Pushes to other branches only build, as a check; nothing is published.
 
