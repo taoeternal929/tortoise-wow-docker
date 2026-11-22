@@ -250,7 +250,7 @@ With your own dump, set `RealmID` in `mangosd.conf` (and the portal's realm id) 
 3. Publishes `ghcr.io/<owner>/tortoise-wow-{realmd,mangosd,tools}:<tag>`. The tag is `1181dev-<upstream commit>-<build id>`, where the build id is a hash of the build files in `server/` (Dockerfile, patches, entrypoint), so a tag always means the same source.
 4. Tests the images: both servers must start (smoke test), then a stack test starts MariaDB from this repo's dump with the new images; realmd must serve logins and mangosd must connect to all four databases. (mangosd then stops at its map check, since CI has no client data.)
 5. Opens (or updates) one pull request, `bot/upstream-sync`, that copies upstream's new SQL migrations into `data/database_updates/` and moves the pinned tag in `docker-compose.yml`. The PR lists new migrations, **warns about migrations upstream edited after release** (existing servers re-run those), lists config settings that differ from upstream's templates, and includes a **database check**: the new migrations are applied on top of the previous version exactly the way mangosd's auto-updater would, and any failure is shown (and put in the PR title) before you deploy.
-6. Pushes the exact built source to GitLab `1181dev` as a fast-forward commit (parents: previous GitLab head + the upstream commit) and tags it `tw-<tag>`.
+6. Tags the exact built source in GitLab `tortoise-wow-dev` as `tw-<tag>` (see [GitLab copies](#gitlab-copies)).
 
 Pushes to other branches only build, as a check; nothing is published.
 
@@ -265,8 +265,7 @@ docker compose up -d
 **One-time setup** (repository settings on GitHub):
 
 - *Settings → Actions → General → Workflow permissions*: tick **Allow GitHub Actions to create and approve pull requests**.
-- *Settings → Secrets and variables → Actions → New repository secret*: `GITLAB_TOKEN`, a GitLab project access token for `tortoise-wow-dev` with role **Developer** (Maintainer if `1181dev` is protected) and scope **write_repository**. Without it the GitLab step is skipped with a warning.
-- Optional repository variables `GITLAB_REPO_URL` / `GITLAB_BRANCH` override the backup target.
+- GitLab tokens as repository secrets: see [GitLab copies](#gitlab-copies).
 - After the first publish, open each package under your GitHub profile → *Packages* and set its visibility to **Public** if it isn't already, so `docker compose pull` works without logging in.
 
 **Building locally instead** (about 10 minutes on 4 cores): `docker compose build realmd mangosd`. The extractors are in the `tools` image:
@@ -276,6 +275,42 @@ docker run --rm -it -v /path/to/wow-client:/client ghcr.io/<owner>/tortoise-wow-
 ```
 
 ---
+## GitLab copies
+
+GitLab's own pull mirroring is a paid feature, so `.github/workflows/gitlab-mirror.yml` pushes the updates to GitLab instead. It keeps two projects current:
+
+| GitLab project | Contents | When |
+|---|---|---|
+| `lurundao/tortoise-wow-docker` | a copy of this repo: every branch and tag | on every push and branch/tag deletion here, plus a full re-sync daily |
+| `lurundao/tortoise-wow-dev` | `main` and `1181dev` = upstream tortoise-wow's branch **plus `server/patches/`** | hourly (and after every build) |
+
+How `tortoise-wow-docker` is updated:
+
+- A GitLab branch that is behind GitHub is fast-forwarded; new branches and tags are created.
+- A GitLab branch with commits GitHub does not have (or a tag pointing elsewhere) is **left alone**, and the run shows a warning listing it. To make GitLab match GitHub for those, run *Actions → GitLab mirror → Run workflow* with **force** ticked.
+- Branches that only exist on GitLab are never touched. A branch or tag is deleted on GitLab only when it is deleted here.
+
+How `tortoise-wow-dev` is updated:
+
+- Each update is one commit on top of the GitLab branch, with upstream's commit as a second parent, so the history reads "merge upstream into main/1181dev" and every push is a fast-forward (no force pushes; your earlier commits stay).
+- The files are exactly upstream plus the patches. Fixes that upstream already has are not re-added (see `server/patches/README.md`).
+- Every image build also tags its exact source as `tw-<image tag>`. A branch never moves back to an older upstream commit; backing up an older build only adds its tag.
+- Branches other than `main` and `1181dev` are not touched. To follow different upstream branches, set the repository variable `GITLAB_FOLLOW_BRANCHES`, e.g. `["main", "1181dev", "dev"]`.
+
+One-time setup (*GitHub repo → Settings → Secrets and variables → Actions*):
+
+| Secret | GitLab token | Role | Scope |
+|---|---|---|---|
+| `GITLAB_TOKEN` | project access token of `tortoise-wow-dev` | **Maintainer** (`main` is a protected branch) | `write_repository` |
+| `GITLAB_DOCKER_TOKEN` | project access token of `tortoise-wow-docker` | **Maintainer** | `write_repository` |
+
+- The `tortoise-wow-docker` project must exist on GitLab (an existing one is fine; see above for how its branches are treated). If you use one personal access token for both projects instead, store it in both secrets.
+- A forced run that has to overwrite a protected GitLab branch (such as `main`) also needs force push allowed on that branch in GitLab.
+- Optional variables `GITLAB_REPO_URL` and `GITLAB_DOCKER_REPO_URL` override the two project URLs.
+- A missing secret skips that part with a warning instead of failing.
+
+---
+
 ## `.gitignore` Recommendations
 
 The following should not be committed to version control due to size or sensitivity:
