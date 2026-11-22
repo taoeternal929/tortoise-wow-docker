@@ -1,0 +1,96 @@
+# Keeps the two GitLab copies current. GitLab's own pull mirroring is a paid
+# feature, so the updates are pushed from here instead.
+#
+# - this repo -> GitLab tortoise-wow-docker: an exact copy of every branch and
+#   tag, on every push and deletion, plus a daily full re-sync.
+# - upstream tortoise-wow main / 1181dev -> GitLab tortoise-wow-dev: each
+#   branch is kept at "upstream branch + server/patches", checked hourly.
+#   (Builds additionally tag the exact source of each image, see upstream-sync.yml.)
+#
+# One-time setup is described in README.md ("GitLab copies").
+name: GitLab mirror
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  delete:
+  schedule:
+    - cron: "23 * * * *"   # hourly: follow upstream branches into tortoise-wow-dev
+    - cron: "53 4 * * *"   # daily: full re-sync of this repo into tortoise-wow-docker
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEV_REPO_URL: ${{ vars.GITLAB_REPO_URL || 'https://gitlab.thesageharbor.com/lurundao/tortoise-wow-dev.git' }}
+
+jobs:
+  this-repo:
+    name: this repo -> GitLab tortoise-wow-docker
+    if: github.event_name != 'schedule' || github.event.schedule == '53 4 * * *'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: gitlab-mirror-this-repo
+      cancel-in-progress: false
+    env:
+      # A token for the tortoise-wow-docker project (until it is set, this job
+      # only warns).
+      GITLAB_TOKEN: ${{ secrets.GITLAB_DOCKER_TOKEN }}
+      SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}.git
+      TARGET_URL: ${{ vars.GITLAB_DOCKER_REPO_URL || 'https://gitlab.thesageharbor.com/lurundao/tortoise-wow-docker.git' }}
+      REF_NAME: ${{ github.event.ref }}
+      REF_TYPE: ${{ github.event.ref_type }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Token not configured
+        if: env.GITLAB_TOKEN == ''
+        run: echo "::warning::GITLAB_DOCKER_TOKEN secret is not set, so this repo was not mirrored to GitLab. See README.md (GitLab copies)."
+      - name: Mirror
+        if: env.GITLAB_TOKEN != ''
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            push)   .github/scripts/mirror-to-gitlab.sh push "$GITHUB_REF" ;;
+            delete) if [ "$REF_TYPE" = tag ]; then r="refs/tags/$REF_NAME"; else r="refs/heads/$REF_NAME"; fi
+                    .github/scripts/mirror-to-gitlab.sh delete "$r" ;;
+            *)      .github/scripts/mirror-to-gitlab.sh all ;;
+          esac
+
+  upstream:
+    name: upstream ${{ matrix.branch }} -> GitLab tortoise-wow-dev
+    # Only the default branch's patches go to GitLab.
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '23 * * * *') ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(vars.GITLAB_FOLLOW_BRANCHES || '["main", "1181dev"]') }}
+    # Shared with upstream-sync.yml's GitLab step, so two runs never push the
+    # same branch at once.
+    concurrency:
+      group: gitlab-dev-${{ matrix.branch }}
+      cancel-in-progress: false
+    env:
+      GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Token not configured
+        if: env.GITLAB_TOKEN == ''
+        run: echo "::warning::GITLAB_TOKEN secret is not set, so tortoise-wow-dev was not updated. See README.md (GitLab copies)."
+      - name: Follow upstream ${{ matrix.branch }}
+        if: env.GITLAB_TOKEN != ''
+        env:
+          BRANCH: ${{ matrix.branch }}
+        run: |
+          set -euo pipefail
+          . server/upstream.env
+          tip=$(git ls-remote "$UPSTREAM_REPO" "refs/heads/$BRANCH" | cut -f1)
+          [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::upstream has no branch $BRANCH"; exit 1; }
+          GITLAB_REPO_URL="$DEV_REPO_URL" GITLAB_BRANCH="$BRANCH" \
+          UPSTREAM_REPO="$UPSTREAM_REPO" UPSTREAM_BRANCH="$BRANCH" UPSTREAM_COMMIT="$tip" \
+          PATCH_DIR=server/patches \
+          SOURCE_NOTE="Synced by: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            .github/scripts/gitlab-backup.sh

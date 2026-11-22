@@ -246,6 +246,10 @@ jobs:
     needs: [plan, build]
     if: always() && needs.plan.outputs.publish == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-24.04
+    # Shared with gitlab-mirror.yml, so two runs never push the same branch at once.
+    concurrency:
+      group: gitlab-dev-${{ vars.GITLAB_BRANCH || '1181dev' }}
+      cancel-in-progress: false
     env:
       GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
     steps:
