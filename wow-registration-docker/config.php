@@ -8,7 +8,8 @@
  **/
 
 // Basic Configuration - Adjust to match your website's details.
-$config['baseurl'] = "http://192.168.1.225:8080";
+// Set from SITE_URL in .env (docker-compose.yml passes it in).
+$config['baseurl'] = getenv('SITE_URL') ?: 'http://localhost:8080';
 $config['page_title'] = "Simple Register"; // The title of your website as displayed in the browser tab.
 $config['language'] = "english"; // The default language for your website.
 $config['supported_langs'] = [ // Define supported languages here. You can remove any language you do not support.
@@ -32,7 +33,7 @@ $config['debug_mode'] = true; // Set to true to enable debug mode if you encount
 // ⚠️ **Important: Remember to disable debug mode** once you have resolved the issues. Debug mode should be set to `false` before deploying the website in a production environment or going live. This helps to ensure security and performance are not compromised.
 
 // Server Information - Customize this with your server's specific details.
-$config['realmlist'] = '192.168.1.225'; // The Realmlist of your server.
+$config['realmlist'] = getenv('HOST_IP') ?: '127.0.0.1'; // The Realmlist of your server (HOST_IP in .env).
 $config['patch_location'] = ''; // URL to download the patch if available. Leave empty if not applicable.
 $config['game_version'] = '1.18.2 (7272)'; // The version of the game that your server is running.
 
@@ -139,19 +140,20 @@ $config['soap_2e_command'] = 'account set 2fa {USERNAME} {SECRET}'; // SOAP comm
 // Database Information - Configure the connection details for your Auth/Realmd database.
 $config['db_auth_host'] = 'mariadb'; // Database host address.
 $config['db_auth_port'] = '3306'; // Database port.
-$config['db_auth_user'] = 'mangos'; // Database username.
-$config['db_auth_pass'] = 'mangos'; // Database password.
+// The portal has its own database user with access to accounts only (see mariadb/init/03-users.sh).
+$config['db_auth_user'] = getenv('REGISTRATION_DB_USER') ?: 'wowreg'; // Database username.
+$config['db_auth_pass'] = getenv('REGISTRATION_DB_PASSWORD') ?: ''; // Database password (REGISTRATION_DB_PASSWORD in .env).
 $config['db_auth_dbname'] = 'tw_logon'; // Database name for your auth/realmd database.
 
 // Realmlist Configuration - Configure the connection details for each realm's character database.
 $config['realmlists'] = array(
-    "1" => array(
-        'realmid' => 1, // Realm ID
+    "2" => array(
+        'realmid' => 2, // Realm ID (must match RealmID in mangosd/mangosd.conf)
         'realmname' => "TurtleWoW", // Realm Name
         'db_host' => "mariadb", // MySQL Host IP
         'db_port' => "3306", // MySQL Host Port
-        'db_user' => "mangos", // MySQL username
-        'db_pass' => 'mangos', // MySQL password
+        'db_user' => getenv('REGISTRATION_DB_USER') ?: 'wowreg', // MySQL username
+        'db_pass' => getenv('REGISTRATION_DB_PASSWORD') ?: '', // MySQL password
         'db_name' => "tw_char", // Characters database name
     ),
 );

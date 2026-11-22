@@ -1,29 +1,19 @@
 #!/bin/bash
 set -e
 
-CONFIG_DIR="/var/www/html/application/config"
-CONFIG_FILE="$CONFIG_DIR/config.php"
-CONFIG_SAMPLE="$CONFIG_DIR/config.php.sample"
+CONFIG_FILE="/var/www/html/application/config/config.php"
 
-# Copy sample config if config.php doesn't exist
+# config.php is bind-mounted read-only by docker-compose.yml and reads its
+# addresses and database login from the environment (SITE_URL, HOST_IP,
+# REGISTRATION_DB_USER, REGISTRATION_DB_PASSWORD), so nothing is written here.
 if [ ! -f "$CONFIG_FILE" ]; then
-    if [ -f "$CONFIG_SAMPLE" ]; then
-        echo "[entrypoint] config.php not found — copying from config.php.sample"
-        cp "$CONFIG_SAMPLE" "$CONFIG_FILE"
-    else
-        echo "[entrypoint] WARNING: Neither config.php nor config.php.sample found in $CONFIG_DIR"
-    fi
-else
-    echo "[entrypoint] config.php already present — skipping copy"
+    echo "[entrypoint] ERROR: $CONFIG_FILE is missing; mount wow-registration-docker/config.php there" >&2
+    exit 1
 fi
-
-# Inject SITE_URL from environment variable if set
-if [ -n "$SITE_URL" ]; then
-    echo "[entrypoint] Setting baseurl to: $SITE_URL"
-    sed "s|^\(\$config\['baseurl'\]\s*=\s*\).*|\1\"${SITE_URL}\";|" "$CONFIG_FILE" > /tmp/config.php.tmp \
-        && cp /tmp/config.php.tmp "$CONFIG_FILE" \
-        && rm /tmp/config.php.tmp
+if [ -z "${REGISTRATION_DB_PASSWORD:-}" ]; then
+    echo "[entrypoint] WARNING: REGISTRATION_DB_PASSWORD is not set; the portal cannot log in to the database" >&2
 fi
+echo "[entrypoint] baseurl: ${SITE_URL:-http://localhost:8080}  realmlist: ${HOST_IP:-127.0.0.1}"
 
-# Start Apache in the foreground
+# Start Apache in the foreground (exec: Apache becomes PID 1 and gets SIGTERM)
 exec apache2-foreground

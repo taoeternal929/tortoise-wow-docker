@@ -27,6 +27,12 @@ on:
       - "server/**"
       - ".github/workflows/upstream-sync.yml"
       - ".github/scripts/**"
+      # the stack test also covers the database setup, server configs and compose file
+      - "mariadb/**"
+      - "realmd/**"
+      - "mangosd/**"
+      - "docker-compose.yml"
+      - ".env.example"
 
 concurrency:
   group: upstream-sync-${{ github.ref }}
@@ -78,9 +84,10 @@ jobs:
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::need a full 40-character upstream commit, got '$commit'"; exit 1; }
 
           # The tag names both inputs of a build: the upstream commit and our
-          # Dockerfile + patches. Same inputs -> same tag; anything else -> new tag.
-          shopt -s nullglob
-          build_id=$(cat server/Dockerfile server/patches/*.patch | sha256sum | cut -c1-8)
+          # build files (everything in server/ that goes into the image, by path
+          # and content). Same inputs -> same tag; anything else -> new tag.
+          build_id=$(cd server && find . -type f ! -name upstream.env ! -name '*.md' -print0 \
+                     | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8)
           tag="${UPSTREAM_BRANCH}-${commit:0:7}-${build_id}"
           image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           pinned_tag=$(grep -oE 'TW_IMAGE_TAG:-[^}]+' docker-compose.yml | head -1 | cut -d- -f2-)

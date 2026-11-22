@@ -31,36 +31,30 @@ A Docker Compose setup for running a [Tortoise WoW](https://github.com/Penqle/to
 ## Directory Structure
 
 ```
-wow-server/
+tortoise-wow-docker/
 ├── docker-compose.yml
-├── .env                        # your host IP and DB credentials go here
+├── .env.example                # copy to .env (not tracked) and fill in: addresses + passwords
 ├── server/
 │   ├── Dockerfile              # builds realmd/mangosd/tools images from upstream source
+│   ├── tw-entrypoint.sh        # fills ${...} placeholders in the server configs from .env
 │   ├── upstream.env            # pinned upstream commit (updated by the sync workflow)
 │   └── patches/                # our changes on top of upstream
 ├── .github/
 │   ├── workflows/upstream-sync.yml
-│   └── scripts/                # sync + GitLab backup scripts used by the workflow
+│   └── scripts/                # sync, database test and GitLab backup scripts
 ├── realmd/
-│   └── realmd.conf
+│   └── realmd.conf             # DB login is ${MYSQL_USER}/${MYSQL_PASSWORD}
 ├── mangosd/
-│   └── mangosd.conf
+│   └── mangosd.conf            # DB logins are ${MYSQL_USER}/${MYSQL_PASSWORD}; RealmID = 2
 ├── mariadb/
-│   ├── Dockerfile
-│   ├── docker-entrypoint-wrap.sh
-│   ├── conf/
-│   │   └── my.cnf              # MariaDB logging configuration
-│   └── init/
-│       ├── 01-grants.sql                                                # user permission grants
-│       ├── 02-mangos_create_database_base_create_realmlist.sql.gz       # base database dump including create_database.sql, base/*.sql, realmlist.
-│       └── 03-realmlist.sh 
-├── wow-registration/          # submodule (upstream code, don't touch)
-├── wow-registration-docker/   # Registeration docker/config files live here
-│   ├── Dockerfile
-│   ├── entrypoint.sh
-│   └── config.php
+│   ├── conf/my.cnf             # logging (errors -> docker logs, slow queries -> data/mysql/slow.log)
+│   ├── set-realm-address.sh    # run by the one-shot `realmlist` service: realm address = HOST_IP
+│   └── init/                   # run once, on an empty data/mysql
+│       ├── 02-mangos_create_database_base_create_realmlist.sql.gz   # base databases, no accounts or characters
+│       └── 03-users.sh         # database users with least privilege (passwords from .env)
+├── wow-registration/           # submodule (upstream portal code, don't touch)
+├── wow-registration-docker/    # portal Dockerfile, entrypoint and config.php
 ├── logs/
-│   ├── mariadb/                # MariaDB log output
 │   ├── realmd/                 # realmd log output
 │   └── mangosd/                # mangosd log output
 └── data/
@@ -69,7 +63,7 @@ wow-server/
     ├── maps/
     ├── vmaps/
     ├── mmaps/
-    ├── database_updates/       # server automatically picks up updates here
+    ├── database_updates/       # SQL migrations; mangosd applies new ones at startup
     └── patches/                # client patches loaded by realmd on auth
 ```
 ---
@@ -78,14 +72,12 @@ wow-server/
 
 ### 1. Game Data Folder
 
-The `data/` directory must contain the following folders extracted from your client using the MaNGOS extraction tools:
+The `data/` directory must contain the following folders extracted from your client with the extractors (they are in the `tortoise-wow-tools` image, see [Automated builds](#automated-builds)):
 
 - `dbc/` — client data tables
 - `maps/` — terrain and map data
 - `vmaps/` — visual/collision maps
 - `mmaps/` — movement maps (pathfinding)
-
-Place them under `data/` as shown in the directory structure above.
 
 ### 2. Patches
 
@@ -93,176 +85,115 @@ Place any client patch files into `data/patches/`. These are mounted into the `r
 
 ### 3. Database
 
-This project ships with a **base database dump** (`mariadb/init/02-mangos_create_database_base_create_realmlist.sql.gz`) that includes:
+This project ships with a **base database dump** (`mariadb/init/02-mangos_create_database_base_create_realmlist.sql.gz`) with all databases (`tw_logon`, `tw_char`, `tw_world`, `tw_logs`), the world data and one realm (`TurtleWoW`, id 2). It contains **no accounts and no characters**; create your own (see First-Time Setup).
 
-- `create_database.sql` — creates all required databases and schemas
-- `base/*.sql` — core world, logon, and character data
-- Realmlist seed entry
+Upstream world updates arrive in `data/database_updates/` through the sync pull requests; `mangosd` applies new ones automatically at startup.
 
-This means **you do not need to port or export a database from an existing server** to get started. Simply follow the First-Time Setup steps below.
-
-For ongoing world data updates, place SQL patch files into `data/database_updates/`. The `mangosd` server picks these up automatically at startup, keeping your world data in sync with upstream [Tortoise WoW](https://github.com/Penqle/tortoise-wow) releases without requiring a full re-import.
-
-> **Migrating from an existing server?** You can still import your own dump by replacing `02-mangos_create_database_base_create_realmlist.sql.gz` with your own export. See [Migration](#migration--re-importing-the-database) below.
+> **Migrating from an existing server?** You can import your own dump instead, see [Migration](#migration--re-importing-the-database).
 
 ---
 
 ## Configuration
 
-### `.env` Environmental Variables
+All site-specific values and passwords live in **`.env`**, which git does not track. Copy the template and fill it in:
 
-Because `realmd` and `mangosd` run inside Docker's internal network (`wow-net`), WoW clients on your LAN need to know your **host machine's LAN IP** to connect. This IP is used to update the realmlist entry in the database at startup.
-
-Auto-detecting the LAN IP from inside the container would require exposing containers to the host network, which introduces unnecessary security risk. Instead, you provide it explicitly via a `.env` file — this keeps containers fully isolated within `wow-net`.
-
-`.env.example`:
-```ini
-# Your host machine's LAN IP (the IP other machines on your network use to reach this machine)
-# To find it on Linux, run: ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}'
-HOST_IP=192.168.1.x
-
-# MariaDB credentials
-MYSQL_ROOT_PASSWORD=yourRootPassword
-MYSQL_USER=mangos
-MYSQL_PASSWORD=mangos
-
-# Registration portal — full URL (including port) that players will use to access it
-# Use your host machine's LAN IP or a domain name
-SITE_URL=http://192.168.1.x:8080
-```
-### `realmd.conf`
-
-Set the database connection to use the Docker service name `mariadb` as the host:
-
-```ini
-LoginDatabaseInfo = "mariadb;3306;mangos;mangos;tw_logon"
-PatchesDir        = "/opt/realmd/patches"
-LogsDir           = "/opt/realmd/logs"
+```bash
+cp .env.example .env
 ```
 
-### `mangosd.conf`
+| Setting | Used for |
+|---|---|
+| `HOST_IP` | Your host's LAN IP. Written into the realm list on every start, so clients can reach mangosd. Containers stay on the internal `wow-net` network instead of the host network. |
+| `SITE_URL` | Address of the registration portal, e.g. `http://192.168.1.x:8080`. |
+| `MYSQL_ROOT_PASSWORD` | MariaDB root. Root can only log in from inside the `mariadb` container. |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | Login of realmd and mangosd: full access to the four `tw_*` databases, nothing else. |
+| `REGISTRATION_DB_USER` / `REGISTRATION_DB_PASSWORD` | Login of the registration portal: create/update accounts, read characters, its own `votes` table. |
+| `REALM_NAME` | Realm row whose address is set to `HOST_IP` (default `TurtleWoW`). |
 
-Similarly, use the service name for all three database connections:
+`docker compose` refuses to start while a required value is missing. Avoid `;` in the passwords (the server configs use it as a separator).
 
-```ini
-WorldDatabaseInfo     = "mariadb;3306;mangos;mangos;mangos"
-CharacterDatabaseInfo = "mariadb;3306;mangos;mangos;characters"
-LoginDatabaseInfo     = "mariadb;3306;mangos;mangos;realmd"
-DataDir               = "/opt/mangosd"
+The configs in the repo hold **no passwords**:
 
-# DB Auto-updater
-Database.AutoUpdate.Enabled = 1
-Database.AutoUpdate.Path = "/opt/mangosd/"
-Database.AutoUpdate.AuthUpdateName = "unused"
-Database.AutoUpdate.CharUpdateName = "unused"
-Database.AutoUpdate.WorldUpdateName = "database_updates"
-```
-### `wow-registration/application/config/config.php`
+- `realmd/realmd.conf` and `mangosd/mangosd.conf` use `${MYSQL_USER}` / `${MYSQL_PASSWORD}`; the image entrypoint fills them in from the environment at startup.
+- `wow-registration-docker/config.php` reads `SITE_URL`, `HOST_IP` and the portal login with `getenv()`.
+- `mangosd.conf`'s `RealmID` must be the `id` of a row in `tw_logon.realmlist` (`2` for the shipped database); the portal's realm entry in `config.php` uses the same id. CI fails if they disagree.
 
-The registration portal connects to the same `mariadb` container as the game server. Key settings:
-
-```php
-$config['db_host'] = 'mariadb';    // Docker service name — never use 127.0.0.1 or localhost
-$config['db_name'] = 'tw_logon';
-$config['db_user'] = 'mangos';
-$config['db_pass'] = 'mangos';
-$config['db_port'] = '3308';
-$config['srp6_support'] = false;   // TurtleWoW/CMangos uses sha_pass_hash, not SRP6
-```
-
-> **`baseurl` is managed automatically** via the `SITE_URL` variable in `.env`. The entrypoint script injects it into `config.php` on every container start — you do not need to set it manually in `config.php`.
-
-> **Important:** Never use `localhost`, `127.0.0.1`, or your host machine's LAN IP in config files. Docker resolves service names automatically within the internal network.
+The registration portal is [WoWSimpleRegistration](https://github.com/masterking32/WoWSimpleRegistration) by masterking32, pinned as the `wow-registration` submodule (clone with `--recurse-submodules`, or run `git submodule update --init`). It shares the `mariadb` container.
 
 ---
-## WoW Simple Registration Portal Setup
 
-The registration portal is based on [WoWSimpleRegistration](https://github.com/masterking32/WoWSimpleRegistration) by masterking32. It shares the existing `mariadb` database — no separate database container is needed.
-
-### 1. Clone WoWSimpleRegistration into the subfolder
-
-```bash
-git clone https://github.com/masterking32/WoWSimpleRegistration wow-registration
-```
-
-### 2. Add the Docker files
-
-Place the following files into the `wow-registration/` directory (they are provided in this repo):
-
-- `Dockerfile` — builds a PHP 8.2 + Apache image with all required extensions (GMP, GD, ZIP, SOAP, Mbstring, PDO, PDO-MySQL) and runs `composer install` automatically at build time
-- `entrypoint.sh` — copies `config.php.sample` on first run and injects `SITE_URL` at every startup
-
-### 3. Create config.php
-
-```bash
-cp wow-registration/application/config/config.php.sample \
-   wow-registration/application/config/config.php
-```
-
-Then edit `config.php` with the settings shown in the [Configuration](#wowregistrationapplicationconfigconfigphp) section above.
-
-### 4. Set SITE_URL in .env
-
-```
-SITE_URL=http://192.168.1.x:8080
-```
-
-This is the only setting that changes between deployments — all asset URLs and form actions are derived from it automatically.
-
-### Updating SITE_URL without rebuilding
-
-If you change `SITE_URL` in `.env`, just restart the container — no rebuild needed:
-
-```bash
-docker compose restart wow-registration
-```
-
-### Verifying the portal is working
-
-```bash
-# Confirm baseurl was injected correctly from SITE_URL
-docker exec -it wow-registration grep "baseurl" /var/www/html/application/config/config.php
-```
 ## First-Time Setup
 
 ```bash
-# 1. Clone this repo
-git clone https://github.com/taoeternal929/tortoise-wow-docker
+# 1. Clone this repo with the portal submodule
+git clone --recurse-submodules https://github.com/taoeternal929/tortoise-wow-docker
 cd tortoise-wow-docker
 
-# 2. Clone WoWSimpleRegistration into the wow-registration subfolder
-git clone https://github.com/masterking32/WoWSimpleRegistration wow-registration
+# 2. Create .env and fill in HOST_IP, SITE_URL and the passwords
+cp .env.example .env
 
-# 3. Copy and configure config.php for the registration portal
-# Edit wow-registration-docker/config.php as described in Configuration above
+# 3. Place your game data (dbc, maps, vmaps, mmaps) under data/
 
-# 4. Edit .env. according fto your HOST_IP, credentials, and SITE_URL
-
-# 5. Place your game data (dbc, maps, vmaps, mmaps) under data/
-
-# 6. Pull the prebuilt server images, then start all services
-#    (mariadb and wow-registration are built locally on first start)
+# 4. Pull the prebuilt server images, then start all services
+#    (the registration portal image is built locally on first start)
 docker compose pull realmd mangosd
 docker compose up -d
 
-# 7. Follow logs to confirm successful database import and server startup
+# 5. Follow logs to confirm the database import and server startup
 docker compose logs -f mariadb
-docker compose logs -f realmd
-docker compose logs -f mangosd
-docker compose logs -f wow-registration
+docker compose logs -f realmd mangosd wow-registration
 
-# 8. Attach to wow-mangosd to create your first game account (Optional)
+# 6. Create your first game account (optional; the portal can do it too)
 docker attach wow-mangosd
 # Press Enter — ">mangosd" prompt should appear
 account create NAME PASSWORD
+# Detach without stopping: Ctrl+P then Ctrl+Q
 
-# 9. To detach without stopping: Ctrl+P then Ctrl+Q
-
-# 10. Open the registration portal in your browser
-#     http://<your SITE_URL>  (e.g. http://192.168.1.x:8080)
+# 7. Open the registration portal: http://<your SITE_URL>
 ```
 
-The MariaDB init process may take a few minutes on first run depending on the size of the database dump.
+The first MariaDB start imports the dump, which takes about a minute.
+
+---
+
+## Upgrading an existing server
+
+Changes that need a one-time step on a server set up before November 2026:
+
+```bash
+# 1. .env is no longer tracked: keep your values, then let git remove the old file
+cp .env ~/tortoise-wow.env.backup
+git checkout -- .env 2>/dev/null; git pull
+
+# 2. Create the new .env from the template. Keep the passwords your database was
+#    created with (from the backup: MYSQL_ROOT_PASSWORD, MYSQL_USER, MYSQL_PASSWORD),
+#    copy HOST_IP and SITE_URL, and choose a new REGISTRATION_DB_PASSWORD.
+cp .env.example .env && nano .env
+
+# 3. Restart on the new setup and apply the new database users once
+docker compose pull realmd mangosd
+docker compose up -d mariadb
+docker compose exec mariadb bash /docker-entrypoint-initdb.d/03-users.sh
+docker compose up -d --build
+
+# 4. Optional clean-up
+rm -f logs/mariadb/general.log logs/mariadb/slow.log logs/mariadb/error.log
+docker image rm tortoise-wow-docker-mariadb 2>/dev/null
+```
+
+`03-users.sh` limits the game login to the `tw_*` databases, creates the portal login, and removes the network-reachable `root@'%'` user that older versions created.
+
+Step 3 replaces the old MariaDB container, which could not shut down cleanly (Docker killed it after 10 seconds on every stop). That happens one last time here; InnoDB recovers by itself on the next start. From then on MariaDB stops cleanly in about a second.
+
+The shipped database used to contain a test account `123` (password `123`) with a character. Fresh installs no longer get it; on an existing server, delete it from the mangosd console if you don't use it: `account delete 123`.
+
+## Changing database passwords
+
+The passwords in `.env` are applied to a database only when it is created. To change them later:
+
+- **Game or portal login:** edit `MYSQL_PASSWORD` / `REGISTRATION_DB_PASSWORD` in `.env`, then
+  `docker compose up -d mariadb && docker compose exec mariadb bash /docker-entrypoint-initdb.d/03-users.sh && docker compose up -d`
+- **Root:** change it in MariaDB first (`docker compose exec mariadb mariadb -uroot -p -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '...'"`), then put the same value in `.env`.
 
 ---
 
@@ -277,10 +208,10 @@ docker compose restart mangosd
 docker attach wow-mangosd
 # Detach without stopping: Ctrl+P then Ctrl+Q
 
-# View live logs
+# View live logs (MariaDB errors are here too)
 docker compose logs -f
 
-# Stop all services
+# Stop all services (MariaDB and mangosd get up to 60 s to shut down cleanly)
 docker compose down
 ```
 
@@ -294,16 +225,19 @@ To migrate to a new host or re-initialize the database with a fresh dump:
 # 1. Stop services
 docker compose down
 
-# 2. Wipe the MariaDB data directory. Remember to back befor doing so!
+# 2. Wipe the MariaDB data directory. Back it up first!
 sudo rm -rf ./data/mysql/*
 
-# 3. Remove provided dump and replace it with your dump file
+# 3. Optionally replace the provided dump with your own
 rm ./mariadb/init/02-*.sql.gz
 cp ~/your_mangos_dump.sql.gz ./mariadb/init/02-mangos_dump.sql.gz
 
-# 4. Bring services back up — init scripts run automatically on empty data dir
+# 4. Bring services back up — init scripts run automatically on an empty data dir
 docker compose up -d
 ```
+
+With your own dump, set `RealmID` in `mangosd.conf` (and the portal's realm id) to your realm's `id`, and `REALM_NAME` in `.env` to its name.
+
 ---
 ## Automated builds
 
@@ -313,7 +247,7 @@ docker compose up -d
 
 1. Reads the tip of upstream `1181dev` (branch and repo are in `server/upstream.env`).
 2. Compiles `realmd`, `mangosd` and the extractors with `server/Dockerfile`: upstream source at that commit plus `server/patches/*.patch`, on Ubuntu 26.04.
-3. Publishes `ghcr.io/<owner>/tortoise-wow-{realmd,mangosd,tools}:<tag>`. The tag is `1181dev-<upstream commit>-<build id>`, where the build id is a hash of the Dockerfile and patches, so a tag always means the same source.
+3. Publishes `ghcr.io/<owner>/tortoise-wow-{realmd,mangosd,tools}:<tag>`. The tag is `1181dev-<upstream commit>-<build id>`, where the build id is a hash of the build files in `server/` (Dockerfile, patches, entrypoint), so a tag always means the same source.
 4. Tests the images: both servers must start (smoke test), then a stack test starts MariaDB from this repo's dump with the new images; realmd must serve logins and mangosd must connect to all four databases. (mangosd then stops at its map check, since CI has no client data.)
 5. Opens (or updates) one pull request, `bot/upstream-sync`, that copies upstream's new SQL migrations into `data/database_updates/` and moves the pinned tag in `docker-compose.yml`. The PR lists new migrations, **warns about migrations upstream edited after release** (existing servers re-run those), lists config settings that differ from upstream's templates, and includes a **database check**: the new migrations are applied on top of the previous version exactly the way mangosd's auto-updater would, and any failure is shown (and put in the PR title) before you deploy.
 6. Pushes the exact built source to GitLab `1181dev` as a fast-forward commit (parents: previous GitLab head + the upstream commit) and tags it `tw-<tag>`.
