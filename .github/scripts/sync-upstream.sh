@@ -68,7 +68,7 @@ list() { if [ $# -eq 0 ]; then echo "_none_"; else printf -- '- `%s`\n' "$@"; fi
   echo "- \`tortoise-wow-mangosd:${new_tag}\`"
   echo "- \`tortoise-wow-tools:${new_tag}\`"
   echo
-  echo "To deploy after merging: \`git pull && docker compose pull && docker compose up -d\`"
+  echo "To deploy after merging: \`git pull && docker compose pull realmd mangosd && docker compose up -d\`"
   echo
   if [ ${#edited[@]} -gt 0 ]; then
     echo "### ⚠️ Edited migrations (${#edited[@]})"
