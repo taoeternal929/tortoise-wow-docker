@@ -281,8 +281,14 @@ GitLab's own pull mirroring is a paid feature, so `.github/workflows/gitlab-mirr
 
 | GitLab project | Contents | When |
 |---|---|---|
-| `lurundao/tortoise-wow-docker` | an exact copy of this repo: every branch and tag | on every push and branch/tag deletion here, plus a full re-sync daily |
+| `lurundao/tortoise-wow-docker` | a copy of this repo: every branch and tag | on every push and branch/tag deletion here, plus a full re-sync daily |
 | `lurundao/tortoise-wow-dev` | `main` and `1181dev` = upstream tortoise-wow's branch **plus `server/patches/`** | hourly (and after every build) |
+
+How `tortoise-wow-docker` is updated:
+
+- A GitLab branch that is behind GitHub is fast-forwarded; new branches and tags are created.
+- A GitLab branch with commits GitHub does not have (or a tag pointing elsewhere) is **left alone**, and the run shows a warning listing it. To make GitLab match GitHub for those, run *Actions → GitLab mirror → Run workflow* with **force** ticked.
+- Branches that only exist on GitLab are never touched. A branch or tag is deleted on GitLab only when it is deleted here.
 
 How `tortoise-wow-dev` is updated:
 
@@ -298,8 +304,8 @@ One-time setup (*GitHub repo → Settings → Secrets and variables → Actions*
 | `GITLAB_TOKEN` | project access token of `tortoise-wow-dev` | **Maintainer** (`main` is a protected branch) | `write_repository` |
 | `GITLAB_DOCKER_TOKEN` | project access token of `tortoise-wow-docker` | **Maintainer** | `write_repository` |
 
-- Create the `tortoise-wow-docker` project on GitLab first, empty (no README). If you use one personal access token for both projects instead, store it in both secrets.
-- If GitHub ever rewrites a branch's history (force push), GitLab refuses the update on a protected branch until you allow force push on it there.
+- The `tortoise-wow-docker` project must exist on GitLab (an existing one is fine; see above for how its branches are treated). If you use one personal access token for both projects instead, store it in both secrets.
+- A forced run that has to overwrite a protected GitLab branch (such as `main`) also needs force push allowed on that branch in GitLab.
 - Optional variables `GITLAB_REPO_URL` and `GITLAB_DOCKER_REPO_URL` override the two project URLs.
 - A missing secret skips that part with a warning instead of failing.
 

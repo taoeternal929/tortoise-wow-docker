@@ -1,8 +1,10 @@
 # Keeps the two GitLab copies current. GitLab's own pull mirroring is a paid
 # feature, so the updates are pushed from here instead.
 #
-# - this repo -> GitLab tortoise-wow-docker: an exact copy of every branch and
-#   tag, on every push and deletion, plus a daily full re-sync.
+# - this repo -> GitLab tortoise-wow-docker: every branch and tag, on every
+#   push and deletion, plus a daily full re-sync. GitLab branches are only
+#   fast-forwarded; one with commits GitHub lacks is left alone and reported
+#   (run this workflow by hand with 'force' to overwrite).
 # - upstream tortoise-wow main / 1181dev -> GitLab tortoise-wow-dev: each
 #   branch is kept at "upstream branch + server/patches", checked hourly.
 #   (Builds additionally tag the exact source of each image, see upstream-sync.yml.)
@@ -19,6 +21,11 @@ on:
     - cron: "23 * * * *"   # hourly: follow upstream branches into tortoise-wow-dev
     - cron: "53 4 * * *"   # daily: full re-sync of this repo into tortoise-wow-docker
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Overwrite tortoise-wow-docker branches/tags on GitLab that differ from GitHub"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,6 +48,8 @@ jobs:
       SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}.git
       TARGET_URL: ${{ vars.GITLAB_DOCKER_REPO_URL || 'https://gitlab.thesageharbor.com/lurundao/tortoise-wow-docker.git' }}
       REF_NAME: ${{ github.event.ref }}
+      # Off by default: GitLab branches with commits GitHub lacks are left alone.
+      MIRROR_FORCE: ${{ github.event.inputs.force == 'true' && '1' || '0' }}
       REF_TYPE: ${{ github.event.ref_type }}
     steps:
       - uses: actions/checkout@v5
