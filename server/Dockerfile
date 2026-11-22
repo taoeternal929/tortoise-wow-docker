@@ -88,6 +88,9 @@ RUN apt-get update \
 ARG UPSTREAM_COMMIT
 LABEL org.opencontainers.image.title="Tortoise WoW server" \
       io.github.tortoise-wow.upstream-commit="${UPSTREAM_COMMIT}"
+# Fills ${VAR} placeholders in the server config from the environment, then
+# exec's the server (see tw-entrypoint.sh).
+COPY --chmod=755 tw-entrypoint.sh /usr/local/bin/tw-entrypoint
 
 # realmd: authentication / realm list server
 FROM runtime AS realmd
@@ -95,7 +98,8 @@ WORKDIR /opt/realmd
 COPY --from=builder /opt/tw/bin/realmd ./realmd
 RUN if ldd ./realmd | grep 'not found'; then exit 1; fi
 EXPOSE 3724
-# realmd.conf is bind-mounted by docker-compose.yml
+# realmd.conf is bind-mounted by docker-compose.yml; its DB login comes from .env
+ENTRYPOINT ["tw-entrypoint"]
 CMD ["./realmd", "-c", "realmd.conf"]
 
 # mangosd: world server
@@ -104,7 +108,9 @@ WORKDIR /opt/mangosd
 COPY --from=builder /opt/tw/bin/mangosd ./mangosd
 RUN if ldd ./mangosd | grep 'not found'; then exit 1; fi
 EXPOSE 8085
-# mangosd.conf and the data folders are bind-mounted by docker-compose.yml
+# mangosd.conf and the data folders are bind-mounted by docker-compose.yml;
+# its DB logins come from .env
+ENTRYPOINT ["tw-entrypoint"]
 CMD ["./mangosd", "-c", "mangosd.conf"]
 
 # tools: map/vmap/mmap extractors, for preparing data/ from a game client

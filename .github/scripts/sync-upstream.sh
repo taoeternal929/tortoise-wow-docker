@@ -60,7 +60,7 @@ list() { if [ $# -eq 0 ]; then echo "_none_"; else printf -- '- `%s`\n' "$@"; fi
   if [ "$old_commit" != "$new_commit" ]; then
     echo "Upstream changes: [\`${old_commit:0:7}...${new_commit:0:7}\`](${repo_web}/compare/${old_commit}...${new_commit})"
   else
-    echo "Same upstream commit as before; the build itself changed (Dockerfile or patches)."
+    echo "Same upstream commit as before; the build files in server/ changed."
   fi
   echo
   echo "**Images** (already built and pushed):"
@@ -68,7 +68,7 @@ list() { if [ $# -eq 0 ]; then echo "_none_"; else printf -- '- `%s`\n' "$@"; fi
   echo "- \`tortoise-wow-mangosd:${new_tag}\`"
   echo "- \`tortoise-wow-tools:${new_tag}\`"
   echo
-  echo "To deploy after merging: \`git pull && docker compose pull && docker compose up -d\`"
+  echo "To deploy after merging: \`git pull && docker compose pull realmd mangosd && docker compose up -d\`"
   echo
   if [ ${#edited[@]} -gt 0 ]; then
     echo "### ⚠️ Edited migrations (${#edited[@]})"

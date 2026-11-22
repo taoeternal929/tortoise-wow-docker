@@ -48,6 +48,10 @@ def start_db(timeout=900):
     if mysql.is_dir() and any(mysql.iterdir()):
         sys.exit("data/mysql is not empty. This test imports a fresh database from the dump and "
                  "applies migrations to it, so it only runs in a clean checkout (CI does that).")
+    if not Path(".env").exists():
+        # CI has no .env; the example's placeholder values are fine for a throwaway database.
+        Path(".env").write_text(Path(".env.example").read_text())
+        print("created .env from .env.example", flush=True)
     for d in ("mysql", "dbc", "maps", "vmaps", "mmaps", "patches"):
         (Path("data") / d).mkdir(parents=True, exist_ok=True)
     compose("up", "-d", "--build", "mariadb")
@@ -97,11 +101,63 @@ def cmd_stack(a):
     for name in want:
         print(f"----- {name} (last lines)")
         print("\n".join(logs(name).strip().splitlines()[-12:]))
+    problems = [f"did not reach the expected startup line: {n}" for n in want if n not in ok]
+    problems += check_realm_id() + check_access()
     compose("down", env=env)
-    missing = [n for n in want if n not in ok]
-    if missing:
-        sys.exit(f"did not reach the expected startup line: {', '.join(missing)}")
+    if problems:
+        sys.exit("stack test failed:\n  " + "\n  ".join(problems))
     print("stack test passed")
+
+
+def env_file():
+    vals = {}
+    for line in Path(".env").read_text().splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            k, v = line.split("=", 1)
+            vals[k.strip()] = v.strip()
+    return vals
+
+
+def check_realm_id():
+    """mangosd.conf's RealmID must be a row in realmlist, and mangosd must use it."""
+    m = re.search(r"^\s*RealmID\s*=\s*(\d+)", Path("mangosd/mangosd.conf").read_text(), re.M)
+    if not m:
+        return ["RealmID not found in mangosd/mangosd.conf"]
+    rid = m.group(1)
+    r = mariadb("tw_logon", f"SELECT name FROM realmlist WHERE id = {rid};")
+    out = []
+    if r.returncode or not r.stdout.strip():
+        ids = mariadb("tw_logon", "SELECT GROUP_CONCAT(id) FROM realmlist;").stdout.strip()
+        out.append(f"RealmID = {rid} in mangosd.conf, but realmlist only has id(s) {ids}")
+    else:
+        print(f"realm id check: RealmID {rid} is realmlist row '{r.stdout.strip()}'")
+    if f"Realm ID: {rid}" not in logs("wow-mangosd"):
+        out.append(f"mangosd did not report 'Realm ID: {rid}'")
+    return out
+
+
+def check_access():
+    """Each database login may do only what it needs (see mariadb/init/03-users.sh)."""
+    e = env_file()
+    cases = [  # (user, password, sql, should_succeed)
+        (e["MYSQL_USER"], e["MYSQL_PASSWORD"], "SELECT 1 FROM tw_world.migrations LIMIT 1", True),
+        (e["MYSQL_USER"], e["MYSQL_PASSWORD"], "SELECT 1 FROM mysql.user LIMIT 1", False),
+        (e["REGISTRATION_DB_USER"], e["REGISTRATION_DB_PASSWORD"], "SELECT COUNT(*) FROM tw_logon.account", True),
+        (e["REGISTRATION_DB_USER"], e["REGISTRATION_DB_PASSWORD"], "SELECT 1 FROM tw_world.migrations LIMIT 1", False),
+        (e["REGISTRATION_DB_USER"], e["REGISTRATION_DB_PASSWORD"], "DELETE FROM tw_logon.account WHERE 0", False),
+        ("root", e["MYSQL_ROOT_PASSWORD"], "SELECT 1", False),   # no root over the network
+    ]
+    out = []
+    for user, pw, sql, should in cases:
+        # Over the network from another container, like realmd, mangosd and the portal.
+        r = subprocess.run(["docker", "compose", "run", "--rm", "--no-deps", "-T", "--entrypoint", "mariadb",
+                            "-e", f"MYSQL_PWD={pw}", "realmlist", "-h", "mariadb", f"-u{user}", "-e", sql],
+                           capture_output=True, text=True)
+        ok = r.returncode == 0
+        print(f"access check: {user}: {sql} -> {'allowed' if ok else 'denied'}")
+        if ok != should:
+            out.append(f"{user} should {'be able to' if should else 'NOT be able to'} run: {sql}")
+    return out
 
 
 # --- migrations -------------------------------------------------------------

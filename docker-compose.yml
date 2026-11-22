@@ -1,26 +1,32 @@
 services:
 
+  # Values come from .env (copy .env.example). Compose refuses to start if a
+  # required one is missing, instead of running with empty passwords.
   mariadb:
-    build:
-      context: ./mariadb
+    image: mariadb:11
     container_name: mariadb
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      HOST_IP: ${HOST_IP} 
-      # Databases are typically created by the DB import scripts,
-      # so we don't set MYSQL_DATABASE here
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env (cp .env.example .env)}
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+      REGISTRATION_DB_USER: ${REGISTRATION_DB_USER:-wowreg}
+      REGISTRATION_DB_PASSWORD: ${REGISTRATION_DB_PASSWORD:?set REGISTRATION_DB_PASSWORD in .env}
+      # root may only log in from inside this container, never over the network
+      MARIADB_ROOT_HOST: localhost
+      # Databases are created by the dump in mariadb/init, so no MYSQL_DATABASE.
     volumes:
       - ./data/mysql:/var/lib/mysql
-      - ./mariadb/init:/docker-entrypoint-initdb.d:ro   # Grant permission
-      - ./mariadb/conf/my.cnf:/etc/mysql/conf.d/logging.cnf:ro
-      - ./logs/mariadb:/var/log/mysql
+      # run once, on an empty data dir: 02 imports the dump, 03 sets up users
+      - ./mariadb/init:/docker-entrypoint-initdb.d:ro
+      - ./mariadb/conf/my.cnf:/etc/mysql/conf.d/tortoise.cnf:ro
     # ports:  # Database debug purpose
     #  - "3307:3306"
     networks:
       - wow-net
+    # mariadbd runs as PID 1 and shuts down cleanly on SIGTERM; give it time to
+    # flush instead of being killed after Docker's default 10 seconds.
+    stop_grace_period: 60s
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
@@ -28,11 +34,31 @@ services:
       retries: 10
       start_period: 30s
 
+  # One-shot job: point the realm list at HOST_IP so clients can connect.
+  # Runs (and exits) every time realmd is started.
+  realmlist:
+    image: mariadb:11
+    container_name: wow-realmlist
+    restart: "no"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      HOST_IP: ${HOST_IP:?set HOST_IP in .env}
+      REALM_NAME: ${REALM_NAME:-TurtleWoW}
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+    volumes:
+      - ./mariadb/set-realm-address.sh:/set-realm-address.sh:ro
+    entrypoint: ["sh", "/set-realm-address.sh"]
+    networks:
+      - wow-net
+
   realmd:
     # Prebuilt by .github/workflows/upstream-sync.yml. The tag is pinned here and
     # moved forward by the workflow's pull requests; `docker compose pull` fetches
     # it. If the image can't be pulled, Compose builds it from source instead.
-    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-realmd:${TW_IMAGE_TAG:-1181dev-a4972d9-5eece623}
+    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-realmd:${TW_IMAGE_TAG:-1181dev-a4972d9-d312ef99}
     build:
       context: ./server
       target: realmd
@@ -43,6 +69,12 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+      realmlist:
+        condition: service_completed_successfully
+    environment:
+      # filled into the ${...} placeholders in realmd.conf
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
     volumes:
       - ./realmd/realmd.conf:/opt/realmd/realmd.conf:ro
       - ./data/patches:/opt/realmd/patches:ro
@@ -53,7 +85,7 @@ services:
       - wow-net
 
   mangosd:
-    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-mangosd:${TW_IMAGE_TAG:-1181dev-a4972d9-5eece623}
+    image: ${TW_IMAGE_REPO:-ghcr.io/taoeternal929}/tortoise-wow-mangosd:${TW_IMAGE_TAG:-1181dev-a4972d9-d312ef99}
     build:
       context: ./server
       target: mangosd
@@ -64,6 +96,12 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+    environment:
+      # filled into the ${...} placeholders in mangosd.conf
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+    # mangosd saves every online character on shutdown
+    stop_grace_period: 60s
     volumes:
       - ./mangosd/mangosd.conf:/opt/mangosd/mangosd.conf:ro
       - ./data/dbc:/opt/mangosd/dbc:ro
@@ -92,10 +130,14 @@ services:
     ports:
       - "8080:80"
     volumes:
-      # Edit config.php on the host; no rebuild needed
-      - ./wow-registration-docker/config.php:/var/www/html/application/config/config.php
+      # Edit config.php on the host; no rebuild needed. Secrets and addresses
+      # are read from the environment below, so the file holds none.
+      - ./wow-registration-docker/config.php:/var/www/html/application/config/config.php:ro
     environment:
-      - SITE_URL=${SITE_URL:-http://localhost:8080}
+      SITE_URL: ${SITE_URL:-http://localhost:8080}
+      HOST_IP: ${HOST_IP:?set HOST_IP in .env}
+      REGISTRATION_DB_USER: ${REGISTRATION_DB_USER:-wowreg}
+      REGISTRATION_DB_PASSWORD: ${REGISTRATION_DB_PASSWORD:?set REGISTRATION_DB_PASSWORD in .env}
     depends_on:
       mariadb:
         condition: service_healthy

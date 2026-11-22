@@ -14,3 +14,6 @@ logs/**/*.log*
 
 # Python bytecode from the CI helper scripts
 __pycache__/
+
+# Local settings and passwords (copy .env.example)
+.env

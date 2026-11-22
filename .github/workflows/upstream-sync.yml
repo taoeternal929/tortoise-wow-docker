@@ -27,6 +27,12 @@ on:
       - "server/**"
       - ".github/workflows/upstream-sync.yml"
       - ".github/scripts/**"
+      # the stack test also covers the database setup, server configs and compose file
+      - "mariadb/**"
+      - "realmd/**"
+      - "mangosd/**"
+      - "docker-compose.yml"
+      - ".env.example"
 
 concurrency:
   group: upstream-sync-${{ github.ref }}
@@ -78,9 +84,10 @@ jobs:
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::need a full 40-character upstream commit, got '$commit'"; exit 1; }
 
           # The tag names both inputs of a build: the upstream commit and our
-          # Dockerfile + patches. Same inputs -> same tag; anything else -> new tag.
-          shopt -s nullglob
-          build_id=$(cat server/Dockerfile server/patches/*.patch | sha256sum | cut -c1-8)
+          # build files (everything in server/ that goes into the image, by path
+          # and content). Same inputs -> same tag; anything else -> new tag.
+          build_id=$(cd server && find . -type f ! -name upstream.env ! -name '*.md' -print0 \
+                     | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8)
           tag="${UPSTREAM_BRANCH}-${commit:0:7}-${build_id}"
           image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           pinned_tag=$(grep -oE 'TW_IMAGE_TAG:-[^}]+' docker-compose.yml | head -1 | cut -d- -f2-)
@@ -223,12 +230,17 @@ jobs:
           git push -f origin "$BOT_BRANCH"
           title="Sync upstream to ${COMMIT:0:7} (${TAG})"
           if grep -q '^❌ \*\*' pr-body.md; then title="❌ migrations fail: $title"; fi
+          # Show the report on the run page even if opening the PR fails below.
+          cat pr-body.md >> "$GITHUB_STEP_SUMMARY"
           if gh pr view "$BOT_BRANCH" --json state -q .state 2>/dev/null | grep -q OPEN; then
             gh pr edit "$BOT_BRANCH" --title "$title" --body-file pr-body.md
-          else
-            gh pr create --base "$BASE" --head "$BOT_BRANCH" --title "$title" --body-file pr-body.md
+          elif ! gh pr create --base "$BASE" --head "$BOT_BRANCH" --title "$title" --body-file pr-body.md 2> pr-error.txt; then
+            cat pr-error.txt >&2
+            if grep -q 'not permitted to create or approve pull requests' pr-error.txt; then
+              echo "::error::GitHub Actions may not open pull requests in this repository. In Settings > Actions > General > Workflow permissions, tick 'Allow GitHub Actions to create and approve pull requests', press Save, then re-run this job. The branch is already pushed; to open the PR by hand: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${BASE}...${BOT_BRANCH}?expand=1"
+            fi
+            exit 1
           fi
-          cat pr-body.md >> "$GITHUB_STEP_SUMMARY"
 
   gitlab-backup:
     needs: [plan, build]
